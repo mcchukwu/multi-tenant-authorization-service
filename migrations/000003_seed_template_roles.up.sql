@@ -2,11 +2,13 @@
 -- These are blueprints, never assigned to a real membership directly. 
 -- New organizations get their OWN COPY of each of these on creation
 -- Editing a template here only affects future organizations, never existing ones.
-INSERT INTO roles (organization_id, name, is_system) VALUES
-  (null, 'owner',  true),
-  (null, 'admin',  true),
-  (null, 'member', true),
-  (null, 'viewer', true)
+INSERT INTO roles (organization_id, name, is_system) 
+VALUES
+(null, 'owner',  true),
+(null, 'admin',  true),
+(null, 'member', true),
+(null, 'viewer', true)
+
 ON CONFLICT (organization_id, name) DO NOTHING;
 
 -- Seed: Template role, Permission Grants
@@ -72,6 +74,7 @@ WITH role_grants (role_name, permission_key) AS (
 )
 
 INSERT INTO role_permissions (role_id, permission_id)
+
 SELECT r.id, p.id
 FROM role_grants g
 JOIN roles r        ON r.name = g.role_name AND r.organization_id IS NULL
