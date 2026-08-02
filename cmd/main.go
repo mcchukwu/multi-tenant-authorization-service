@@ -24,7 +24,7 @@ func main() {
 	}
 	logger.Info("Connected to database")
 
-	//
+	// Start server safely
 	server := &http.Server{
 		Addr:         ":" + cfg.AppPort,
 		Handler:      mux,
@@ -33,7 +33,6 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server safely
 	go func() {
 		logger.Info("Egento API starting on port " + cfg.AppPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

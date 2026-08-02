@@ -10,6 +10,7 @@ import (
 
 var DB *sql.DB
 
+// Connect() takes a database connection string and opens a connection to the database, returning an error if there is a problem
 func Connect(dsn string) error {
 	database, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -32,4 +33,3 @@ func Connect(dsn string) error {
 
 	return nil
 }
-
