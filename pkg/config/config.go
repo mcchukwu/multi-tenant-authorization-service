@@ -37,7 +37,7 @@ func Load() *Config {
 // - getEnv gets the value of the enviroment variable returns the value or a specified fallback value
 func getEnv(key string, fallback string) string {
 	value := os.Getenv(key)
-	if value != "" {
+	if value == "" {
 		return fallback
 	}
 

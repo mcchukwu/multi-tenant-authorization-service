@@ -1,5 +1,6 @@
 bin/*
 .log
+.env
 
 # Extend ignore patterns here
 	
