@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"log"
 	"os"
 
@@ -11,8 +12,7 @@ type Config struct {
 	AppName string `env:"APP_NAME"`
 	AppPort string `env:"APP_PORT"`
 	AppEnv  string `env:"APP_ENV"`
-
-	DatabaseURL string `env:"DATABASE_URL"`
+	DBURL   string `env:"DATABASE_URL"`
 }
 
 // Load loads the configuration from the environment variables and returns the configuration struct
@@ -25,16 +25,34 @@ func Load() *Config {
 		AppName: getEnv("APP_NAME", "[app name]"),
 		AppPort: getEnv("APP_PORT", "8080"),
 		AppEnv:  getEnv("APP_ENV", "development"),
-
-		DatabaseURL: getEnv("DATABASE_URL", ""),
+		DBURL:   getEnv("DB_URL", ""),
 	}
 }
 
-// TODO: Add validations
+func Validate(c *Config) error {
+	if c.AppName == "" {
+		return errors.New("app name is required")
+	}
 
+	if c.AppPort == "" {
+		return errors.New("app port is required")
+	}
+
+	if c.AppEnv != "production" && c.AppEnv != "development" {
+		return errors.New("invalid app env")
+	}
+
+	if c.DBURL == "" {
+		return errors.New("database url is required")
+	}
+
+	return nil
+}
+
+// -
 // Helpers
 // -
-// - getEnv gets the value of the enviroment variable returns the value or a specified fallback value
+// getEnv() gets the value of the enviroment variable key returns the value or a specified fallback value
 func getEnv(key string, fallback string) string {
 	value := os.Getenv(key)
 	if value == "" {
