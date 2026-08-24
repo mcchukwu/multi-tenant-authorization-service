@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,16 +39,15 @@ func main() {
 
 	// Start server in a goroutine
 	server := http.Server{
-		Addr:    cfg.AppPort,
+		Addr:    ":" + cfg.AppPort,
 		Handler: mux,
 	}
 
 	go func() {
 		logger.Info("Server is running")
 		err = server.ListenAndServe()
-		if err == http.ErrServerClosed {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("Failed to start server")
-			os.Exit(1)
 		}
 	}()
 
