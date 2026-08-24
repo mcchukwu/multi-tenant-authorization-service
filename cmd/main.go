@@ -40,12 +40,12 @@ func main() {
 	// Start server in a goroutine
 	server := http.Server{
 		Addr:    ":" + cfg.AppPort,
-		Handler: mux,
+		Handler: v1,
 	}
 
 	go func() {
 		logger.Info("Server is running")
-		err = server.ListenAndServe()
+		err := server.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("Failed to start server")
 		}
