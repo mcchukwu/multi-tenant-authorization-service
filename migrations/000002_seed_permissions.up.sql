@@ -1,5 +1,4 @@
--- Seed: Permissions (global catalog — not org-scoped)
--- These are the atomic actions the middleware will check against, 
+-- Seed: Permissions (global catalog — not org-scoped). These are the atomic actions the middleware will check against, 
 -- e.g. `CanUser(userID, orgID, "project.delete", resourceID)`.
 INSERT INTO permissions (key, description) 
 VALUES

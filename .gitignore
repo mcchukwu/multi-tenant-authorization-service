@@ -1,6 +1,7 @@
 bin/*
 .log
 .env
+mv.md
 
 # Extend ignore patterns here
 	

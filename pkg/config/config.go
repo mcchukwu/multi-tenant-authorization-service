@@ -2,46 +2,46 @@ package config
 
 import (
 	"errors"
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
 
+// Create a configuration struct
 type Config struct {
 	AppName string `env:"APP_NAME"`
 	AppPort string `env:"APP_PORT"`
 	AppEnv  string `env:"APP_ENV"`
-	DBURL   string `env:"DATABASE_URL"`
+	DBURL   string `env:"DB_URL"`
 }
 
-// Load loads the configuration from the environment variables and returns the configuration struct
+// Load() loads the configuration from the environment variables and returns the configuration struct
 func Load() *Config {
-	if err := godotenv.Load(); err != nil {
-		log.Fatal(".env file not found")
+	err := godotenv.Load()
+	if err != nil {
+		logger.Error("Failed to load environment variables")
 	}
 
 	return &Config{
-		AppName: getEnv("APP_NAME", "[app name]"),
-		AppPort: getEnv("APP_PORT", "8080"),
-		AppEnv:  getEnv("APP_ENV", "development"),
+		AppName: getEnv("APP_NAME", ""),
+		AppPort: getEnv("APP_PORT", ""),
+		AppEnv:  getEnv("APP_ENV", ""),
 		DBURL:   getEnv("DB_URL", ""),
 	}
 }
 
+// Validate() validates the configuration struct
 func Validate(c *Config) error {
 	if c.AppName == "" {
 		return errors.New("app name is required")
 	}
-
 	if c.AppPort == "" {
 		return errors.New("app port is required")
 	}
-
 	if c.AppEnv != "production" && c.AppEnv != "development" {
 		return errors.New("invalid app env")
 	}
-
 	if c.DBURL == "" {
 		return errors.New("database url is required")
 	}
@@ -49,7 +49,6 @@ func Validate(c *Config) error {
 	return nil
 }
 
-// -
 // Helpers
 // -
 // getEnv() gets the value of the enviroment variable key returns the value or a specified fallback value

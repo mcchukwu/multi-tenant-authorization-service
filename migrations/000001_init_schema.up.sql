@@ -45,12 +45,14 @@ CREATE INDEX idx_users_phone ON users(phone);
 
 -- Organizations (Tenants)
 CREATE TYPE organization_status AS ENUM ('active', 'suspended', 'deleted');
+CREATE TYPE organization_type AS ENUM ('personal', 'business');
 
 CREATE TABLE organizations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            TEXT NOT NULL,
+    type        organization_type NOT NULL DEFAULT 'business',
     slug            TEXT UNIQUE,
-    status          organization_status NOT NULL DEFAULT 'active',
+    status      organization_status NOT NULL DEFAULT 'active',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

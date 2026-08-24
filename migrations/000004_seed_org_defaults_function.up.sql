@@ -1,9 +1,6 @@
--- Function: provision_default_roles(organization_id)
--- Clones every template role (organization_id IS NULL) into
--- org-scoped copies, along with each template's permission grants.
--- Called automatically via trigger on organization creation
--- Can also be called manually/idempotently
--- if you ever need to re-seed an org (e.g. after a bug wiped roles).
+-- Function: provision_default_roles(organization_id) Clones every template role (organization_id IS NULL) into
+-- org-scoped copies, along with each template's permission grants. Called automatically via trigger on organization creation 
+-- Can also be called manually/idempotently.
 CREATE OR REPLACE FUNCTION provision_default_roles(p_organization_id UUID)
 RETURNS VOID AS $$
 BEGIN

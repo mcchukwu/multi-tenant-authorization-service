@@ -1,7 +1,6 @@
--- Seed: Template roles (organization_id IS NULL)
--- These are blueprints, never assigned to a real membership directly. 
--- New organizations get their OWN COPY of each of these on creation
--- Editing a template here only affects future organizations, never existing ones.
+-- Seed: Template roles (organization_id IS NULL). These are blueprints, never assigned to a real membership directly. 
+-- New organizations get their OWN COPY of each of these on creation Editing a template here only affects
+-- future organizations, never existing ones.
 INSERT INTO roles (organization_id, name, is_system) 
 VALUES
 (null, 'owner',  true),
@@ -12,12 +11,10 @@ VALUES
 ON CONFLICT (organization_id, name) DO NOTHING;
 
 -- Seed: Template role, Permission Grants
--- Written declaratively (role name, permission key) and resolved via a join, 
--- so this file stays readable — no hardcoded UUIDs.
+-- Written declaratively (role name, permission key) and resolved via a join, so this file stays readable — no hardcoded UUIDs.
 WITH role_grants (role_name, permission_key) AS (
   VALUES
-    -- Owner: everything. Owner is the only role that can
-    -- delete the org or edit the RBAC config itself.
+    -- Owner: everything. Owner is the only role that can delete the org or edit the RBAC config itself.
     ('owner', 'org.view'),
     ('owner', 'org.update'),
     ('owner', 'org.delete'),
@@ -39,8 +36,7 @@ WITH role_grants (role_name, permission_key) AS (
 
     ('owner', 'audit_log.view'),
 
-    -- Admin: full operational control, but CANNOT 
-    -- delete the org or edit the RBAC config itself
+    -- Admin: full operational control, but CANNOT delete the org or edit the RBAC config itself
     ('admin', 'org.view'),
     ('admin', 'org.update'),
 

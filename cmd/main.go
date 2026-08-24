@@ -2,26 +2,25 @@ package main
 
 import (
 	"context"
-	"multi-tenant-authorization-service/pkg/config"
-	"multi-tenant-authorization-service/pkg/db"
-	"multi-tenant-authorization-service/pkg/logger"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
 
 func main() {
 	// Load and validate configuration
 	cfg := config.Load()
-	if err := config.Validate(cfg); err != nil {
-		logger.Error("Invalid configuration: %s", err.Error())
+	err := config.Validate(cfg)
+	if err != nil {
+		logger.Error("Invalid configuration")
 		os.Exit(1)
 	}
-
-	// Create a new HTTP router
-	mux := http.NewServeMux()
 
 	// Connect to database
 	if err := db.Connect(cfg.DBURL); err != nil {
@@ -30,42 +29,47 @@ func main() {
 	}
 	logger.Info("Connected to database")
 
-	// Start server safely
-	server := &http.Server{
-		Addr:         ":" + cfg.AppPort,
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	// Create routes routes
+	mux := http.NewServeMux()
+
+	// Versioned API
+	v1 := http.NewServeMux()
+	v1.Handle("/api/v1/", http.StripPrefix("/api/v1", mux))
+
+	// Start server in a goroutine
+	server := http.Server{
+		Addr:    cfg.AppPort,
+		Handler: mux,
 	}
+
 	go func() {
-		logger.Info("Server is running on port %s", cfg.AppPort)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Info("Server is running")
+		err = server.ListenAndServe()
+		if err == http.ErrServerClosed {
 			logger.Error("Failed to start server")
 			os.Exit(1)
 		}
 	}()
 
-	// Shutdown signal listener
+	// Wait to receive shutdown signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// Graceful shutdown context
-	logger.Info("Shutting down server")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Start graceful shutdown
+	logger.Info("Graceful shutdown started")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
+
+	err = server.Shutdown(ctx)
+	if err != nil {
 		logger.Error("Graceful shutdown failed")
-		server.Close()
+		os.Exit(1)
 	}
 
 	// Close database connection
-	logger.Info("Closing database connection")
-	if err := db.DB.Close(); err != nil {
-		logger.Error("Failed to close database connection")
-	}
-	logger.Info("Database connection closed")
+	db.DBPOOL.Close()
+	logger.Info("Database closed")
 
-	logger.Info("Server is exiting gracefully")
+	logger.Info("Server stopped")
 }
