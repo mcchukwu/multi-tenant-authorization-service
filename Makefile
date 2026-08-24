@@ -15,6 +15,3 @@ clean:
 
 test:
 	go test ./...
-	
-migrate:
-	migrate -source "file://./migrations" -database "postgres://miracle:nolly@localhost:5435/mtasdb?sslmode=disable"
