@@ -9,7 +9,16 @@ DROP INDEX IF EXISTS idx_sessions_token_family_id;
 DROP INDEX IF EXISTS idx_sessions_user_id;
 DROP TABLE IF EXISTS sessions;
 
+DROP INDEX IF EXISTS idx_invitations_organization_id;
+DROP INDEX IF EXISTS idx_active_invite_token;
+DROP TRIGGER IF EXISTS invitations_updated_at
+ON invitations;
+DROP TABLE IF EXISTS invitations;
+DROP TYPE IF EXISTS invite_status;
+DROP TYPE IF EXISTS invite_type;
+
 DROP INDEX IF EXISTS idx_memberships_role_id;
+DROP INDEX IF EXISTS idx_memberships_organization_id;
 DROP INDEX IF EXISTS idx_unique_membership;
 DROP TRIGGER IF EXISTS memberships_updated_at
 ON memberships;
@@ -19,10 +28,12 @@ DROP TYPE IF EXISTS membership_status;
 DROP INDEX IF EXISTS idx_role_permissions_permission_id;
 DROP TABLE IF EXISTS role_permissions;
 
+DROP INDEX IF EXISTS idx_roles_template_name;
 DROP INDEX IF EXISTS idx_roles_organization_id;
 DROP TRIGGER IF EXISTS roles_updated_at
 ON roles;
 DROP TABLE IF EXISTS roles;
+DROP TYPE IF EXISTS role_kind;
 
 DROP TABLE IF EXISTS permissions;
 
@@ -30,6 +41,7 @@ DROP TRIGGER IF EXISTS organizations_updated_at
 ON organizations;
 DROP TABLE IF EXISTS organizations;
 DROP TYPE IF EXISTS organization_status;
+DROP TYPE IF EXISTS organization_type;
 
 DROP INDEX IF EXISTS idx_users_phone;
 DROP INDEX IF EXISTS idx_users_email;

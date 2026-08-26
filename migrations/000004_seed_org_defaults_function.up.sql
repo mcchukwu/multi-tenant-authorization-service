@@ -1,12 +1,14 @@
--- Function: provision_default_roles(organization_id) Clones every template role (organization_id IS NULL) into
--- org-scoped copies, along with each template's permission grants. Called automatically via trigger on organization creation 
--- Can also be called manually/idempotently.
+-- Function: provision_default_roles(organization_id)
+-- Clones every template role (organization_id IS NULL) into org-scoped copies, 
+-- along with each template's permission grants. Called automatically via trigger on organization creation; 
+-- can also be called manually/idempotently.
 CREATE OR REPLACE FUNCTION provision_default_roles(p_organization_id UUID)
 RETURNS VOID AS $$
 BEGIN
-  -- Step 1: copy each template role into this org, preserving name + is_system
-  INSERT INTO roles (organization_id, name, is_system)
-  SELECT p_organization_id, r.name, r.is_system
+  -- Step 1: copy each template role into this org, preserving name + kind + is_system. 
+  -- kind must carry through the clone, without it every org-scoped role would default back to 'custom'.
+  INSERT INTO roles (organization_id, name, kind, is_system)
+  SELECT p_organization_id, r.name, r.kind, r.is_system
   FROM roles r
   WHERE r.organization_id IS NULL
   ON CONFLICT (organization_id, name) DO NOTHING;
@@ -15,13 +17,15 @@ BEGIN
   INSERT INTO role_permissions (role_id, permission_id)
   SELECT org_role.id, rp.permission_id
   FROM roles template_role
-  JOIN role_permissions rp   ON rp.role_id = template_role.id
-  JOIN roles org_role        ON org_role.organization_id = p_organization_id
-                             AND org_role.name = template_role.name
+  JOIN role_permissions rp ON rp.role_id = template_role.id
+  JOIN roles org_role      ON org_role.organization_id = p_organization_id
+                           AND org_role.name = template_role.name
   WHERE template_role.organization_id IS NULL
   ON CONFLICT (role_id, permission_id) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
+
+--
 
 -- Trigger: fire provision_default_roles() after every org insert
 CREATE OR REPLACE FUNCTION trigger_provision_default_roles()

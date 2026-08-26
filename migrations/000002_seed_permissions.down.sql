@@ -13,10 +13,10 @@ DELETE FROM permissions WHERE KEY IN (
   'role.update',
   'role.delete',
 
-  'project.create',
-  'project.view',
-  'project.update',
-  'project.delete',
+  'resource.create',
+  'resource.view',
+  'resource.update',
+  'resource.delete',
 
   'audit_log.view'
 );
