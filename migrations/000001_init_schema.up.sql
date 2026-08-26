@@ -200,22 +200,31 @@ CREATE INDEX idx_invitations_organization_id ON invitations(organization_id);
 
 -- Sessions (auth + device tracking, with refresh token rotation support)
 CREATE TABLE sessions (
-  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_family_id    UUID NOT NULL DEFAULT gen_random_uuid(),
+  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_family_id          UUID NOT NULL DEFAULT gen_random_uuid(),
   -- shared across all rotated tokens in one continuous session lineage; reuse of a revoked token => revoke entire family (theft signal)
 
-  refresh_token_hash TEXT UNIQUE NOT NULL,
-  user_agent         TEXT,
-  ip_address         TEXT,
-  revoked            BOOLEAN NOT NULL DEFAULT FALSE,
-  revoked_at         TIMESTAMPTZ,
-  expires_at         TIMESTAMPTZ NOT NULL,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  refresh_token_hash       TEXT UNIQUE NOT NULL,
+  access_token_hash        TEXT UNIQUE NOT NULL,
+  user_agent               TEXT,
+  ip_address               TEXT,
+  revoked                  BOOLEAN NOT NULL DEFAULT FALSE,
+  revoked_at               TIMESTAMPTZ,
+  access_token_expires_at  TIMESTAMPTZ NOT NULL,
+  refresh_token_expires_at TIMESTAMPTZ NOT NULL,
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- NOTE: created_at is not updated when a token is rotated, so it's not a reliable indicator of session lifetime
+
+  CHECK (
+    (revoked = FALSE AND revoked_at IS NULL) OR
+    (revoked = TRUE  AND revoked_at IS NOT NULL)
+  )
 );
 
 CREATE INDEX idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX idx_sessions_token_family_id ON sessions(token_family_id);
+CREATE INDEX idx_sessions_cleanup ON sessions(refresh_token_expires_at) WHERE revoked = FALSE;
 
 --
 
