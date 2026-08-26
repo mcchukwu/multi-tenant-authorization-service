@@ -2,52 +2,84 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/mcchukwu/multi-tenant-authorization-service/internal/app"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/health"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
 
 func main() {
-	// Load and validate configuration
+	// Configuration
 	cfg := config.Load()
 	if err := config.Validate(cfg); err != nil {
 		logger.Error("Invalid configuration")
 		os.Exit(1)
 	}
 
-	// Create application
-	application, err := app.New(cfg)
+	// Infrastructure
+	dbPool, err := db.Connect(cfg.DBURL)
 	if err != nil {
-		logger.Error("Failed to create application")
+		logger.Error("Failed to connect to database")
 		os.Exit(1)
+	}
+	logger.Info("Connected to database")
+
+	// Dependencies
+	healthHandler := health.NewHandler(dbPool)
+
+	// Routing
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /health", healthHandler.Health)
+	mux.HandleFunc("GET /health/live", healthHandler.Live)
+	mux.HandleFunc("GET /health/ready", healthHandler.Ready)
+
+	v1 := http.NewServeMux()
+	v1.Handle("/v1/", http.StripPrefix("/v1", mux))
+
+	// Server
+	server := &http.Server{
+		Addr:    ":" + cfg.AppPort,
+		Handler: v1,
 	}
 
-	// Start application
-	if err := application.Start(); err != nil {
-		logger.Error("Failed to start application")
-		os.Exit(1)
-	}
+	// Start Server
+	go func() {
+		logger.Info("Server is running...")
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("Server failed to start")
+		}
+	}()
 
 	// Wait for shutdown signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(quit)
-
 	<-quit
 
 	// Start graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	logger.Info("Application shutdown started")
 
-	if err := application.Shutdown(shutdownCtx); err != nil {
-		logger.Error("Application shutdown failed")
+	// Stop accepting new HTTP requests and wait for active requests to finish
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Error("Server failed to shutdown")
 		os.Exit(1)
 	}
+	logger.Info("Server stopped")
 
+	// The HTTP server has finished, so nothing should still be using the database through HTTP handlers.
+	dbPool.Close()
+	logger.Info("Database closed")
+	logger.Info("Application shutdown completed")
 	logger.Info("Application stopped")
 }
