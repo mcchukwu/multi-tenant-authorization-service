@@ -8,17 +8,17 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
 )
 
-type Repo struct {
+type Repository struct {
 	db *pgxpool.Pool
 }
 
-func NewRepo(db *pgxpool.Pool) *Repo {
-	return &Repo{
+func NewRepository(db *pgxpool.Pool) *Repository {
+	return &Repository{
 		db: db,
 	}
 }
 
-func (r *Repo) Log(ctx context.Context, logEntry LogEntry, metadata []byte) error {
+func (r *Repository) Log(ctx context.Context, logEntry LogEntry, metadata []byte) error {
 	ctx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 

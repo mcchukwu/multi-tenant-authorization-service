@@ -9,13 +9,15 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/normalize"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/response"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/validation"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 )
 
 type Handler struct {
 	service *Service
+	cfg     *config.Config
 }
 
-func NewHandler(service *Service) *Handler {
+func NewHandler(service *Service, cfg *config.Config) *Handler {
 	return &Handler{
 		service: service,
 	}
@@ -57,7 +59,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    result.RefreshToken,
 		Path:     "/v1/auth",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   h.cfg.AppEnv == "production",
 		SameSite: http.SameSiteStrictMode,
 		Expires:  result.RefreshTokenExpiresAt,
 	})

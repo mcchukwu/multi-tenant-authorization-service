@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/audit"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/auth"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/health"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
@@ -34,12 +36,21 @@ func main() {
 	// Dependencies
 	healthHandler := health.NewHandler(dbPool)
 
+	auditRepo := audit.NewRepository(dbPool)
+	auditService := audit.NewService(auditRepo)
+
+	authRepo := auth.NewRepository(dbPool)
+	authService := auth.NewService(authRepo, auditService, cfg)
+	authHandler := auth.NewHandler(authService, cfg)
+
 	// Routing
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", healthHandler.Health)
 	mux.HandleFunc("GET /health/live", healthHandler.Live)
 	mux.HandleFunc("GET /health/ready", healthHandler.Ready)
+
+	mux.Handle("POST /auth/login", http.HandlerFunc(authHandler.Login))
 
 	v1 := http.NewServeMux()
 	v1.Handle("/v1/", http.StripPrefix("/v1", mux))
@@ -71,16 +82,15 @@ func main() {
 	select {
 	case <-shutdownSignal:
 		healthHandler.SetReady(false)
-		logger.Info("Application shutdown started")
 	case <-serverErr:
 		logger.Error("Server failed to start")
 		os.Exit(1)
 	}
 
 	// Start graceful shutdown
+	logger.Info("Application shutdown started")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	logger.Info("Application shutdown started")
 
 	// Stop accepting new HTTP requests and wait for active requests to finish
 	if err := server.Shutdown(shutdownCtx); err != nil {
