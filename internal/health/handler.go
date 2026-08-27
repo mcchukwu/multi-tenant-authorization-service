@@ -17,18 +17,15 @@ type Handler struct {
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
-	h := &Handler{
+	return &Handler{
 		db: db,
 	}
-
-	return h
 }
 
 func (h *Handler) SetReady(ready bool) {
 	h.ready.Store(ready)
 }
 
-// Health probe
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, "service healthy", map[string]any{
 		"status": "ok",
@@ -36,7 +33,6 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Readiness probe
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	if !h.ready.Load() {
 		response.Error(w, http.StatusServiceUnavailable, "service_unavailable", "service unavailable")
@@ -56,12 +52,10 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, "service ready", nil)
 }
 
-// Liveness probe
 func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, "service alive", nil)
 }
 
-// ServeHTTP
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

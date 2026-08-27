@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
@@ -10,10 +11,12 @@ import (
 
 // Create a configuration struct
 type Config struct {
-	AppName string `env:"APP_NAME"`
-	AppPort string `env:"APP_PORT"`
-	AppEnv  string `env:"APP_ENV"`
-	DBURL   string `env:"DB_URL"`
+	AppName         string        `env:"APP_NAME"`
+	AppPort         string        `env:"APP_PORT"`
+	AppEnv          string        `env:"APP_ENV"`
+	DBURL           string        `env:"DB_URL"`
+	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL"`
+	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL"`
 }
 
 // Load() loads the configuration from the environment variables and returns the configuration struct
@@ -23,11 +26,23 @@ func Load() *Config {
 		logger.Error("Failed to load environment variables")
 	}
 
+	accessTokenTTL, err := time.ParseDuration(getEnv("JWT_ACCESS_TTL", "10m"))
+	if err != nil {
+		logger.Error("Failed to parse access token TTL")
+	}
+
+	refreshTokenTTL, err := time.ParseDuration(getEnv("JWT_REFRESH_TTL", "720h"))
+	if err != nil {
+		logger.Error("Failed to parse refresh token TTL")
+	}
+
 	return &Config{
-		AppName: getEnv("APP_NAME", ""),
-		AppPort: getEnv("APP_PORT", ""),
-		AppEnv:  getEnv("APP_ENV", ""),
-		DBURL:   getEnv("DB_URL", ""),
+		AppName:         getEnv("APP_NAME", ""),
+		AppPort:         getEnv("APP_PORT", ""),
+		AppEnv:          getEnv("APP_ENV", ""),
+		DBURL:           getEnv("DB_URL", ""),
+		AccessTokenTTL:  accessTokenTTL,
+		RefreshTokenTTL: refreshTokenTTL,
 	}
 }
 
