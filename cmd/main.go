@@ -51,19 +51,31 @@ func main() {
 	}
 
 	// Start Server
+	serverErr := make(chan error, 1)
 	go func() {
 		logger.Info("Server is running...")
 		err := server.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("Server failed to start")
+			serverErr <- err
 		}
 	}()
 
+	healthHandler.SetReady(true)
+	logger.Info("Application is ready")
+
 	// Wait for shutdown signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(quit)
-	<-quit
+	shutdownSignal := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(shutdownSignal)
+
+	select {
+	case <-shutdownSignal:
+		healthHandler.SetReady(false)
+		logger.Info("Application shutdown started")
+	case <-serverErr:
+		logger.Error("Server failed to start")
+		os.Exit(1)
+	}
 
 	// Start graceful shutdown
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
