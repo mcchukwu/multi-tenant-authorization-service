@@ -9,9 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/apperrors"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
 
 type Repository struct {
@@ -103,8 +105,8 @@ func (r *Repository) CreateMembership(ctx context.Context, userID, orgID, roleID
 type userRecord struct {
 	ID           uuid.UUID
 	PasswordHash string
-	Email        string
-	Phone        string
+	Email        pgtype.Text
+	Phone        pgtype.Text
 	FirstName    string
 	LastName     string
 	Status       string
@@ -123,19 +125,20 @@ func (r *Repository) GetUserByIdentifier(ctx context.Context, identifier string)
                 SELECT id, password_hash, email, phone, first_name, last_name, status
 								FROM users 
 								WHERE email = $1
-            `, identifier).Scan(&u.ID, &u.PasswordHash, u.Email, u.Phone, &u.FirstName, &u.LastName, &u.Status)
+            `, identifier).Scan(&u.ID, &u.PasswordHash, &u.Email, &u.Phone, &u.FirstName, &u.LastName, &u.Status)
 	} else {
 		err = r.dbQuerier.QueryRow(ctx, `
                 SELECT id, password_hash, email, phone, first_name, last_name, status
 								FROM users 
 								WHERE phone = $1
-            `, identifier).Scan(&u.ID, &u.PasswordHash, u.Email, u.Phone, &u.FirstName, &u.LastName, &u.Status)
+            `, identifier).Scan(&u.ID, &u.PasswordHash, &u.Email, &u.Phone, &u.FirstName, &u.LastName, &u.Status)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apperrors.ErrUserNotFound
 		}
 
+		logger.Error(err.Error())
 		return nil, apperrors.ErrDatabase
 	}
 
@@ -175,7 +178,11 @@ func (r *Repository) CreateSession(ctx context.Context, s *NewSession) (sessionI
 		s.UserAgent, s.IPAddress,
 		s.AccessTokenExpiresAt, s.RefreshTokenExpiresAt,
 	).Scan(&sessionID)
-	return sessionID, err
+	if err != nil {
+		return "", apperrors.ErrDatabase
+	}
+
+	return sessionID, nil
 }
 
 type SessionRecord struct {

@@ -92,8 +92,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Normalize if identifier
-	req.Identifier = normalize.Identifier(req.Identifier, "")
+	req.Identifier = normalize.Identifier(req.Identifier, "NG")
 
+	// Validate request
 	if err := validation.ValidateStruct(req); err != nil {
 		response.ValidationError(w, err)
 		return
