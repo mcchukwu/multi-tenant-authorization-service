@@ -12,7 +12,7 @@ import (
 
 // Authn validates the bearer access token on every protected request and
 // attaches the resulting user ID to the request context. It answers only
-// "who is this" — it deliberately knows nothing about organizations,
+// "who is this", it deliberately knows nothing about organizations,
 // roles, or permissions; that's authz middleware's job, and it runs after
 // this one, reading the identity this middleware sets.
 func Authn(repo *auth.Repository) func(http.Handler) http.Handler {

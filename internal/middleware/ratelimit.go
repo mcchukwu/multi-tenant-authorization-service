@@ -16,7 +16,7 @@ type visitor struct {
 	lastSeen time.Time
 }
 
-// RateLimiter is deliberately generic over what a "key" means — a per-IP
+// RateLimiter is deliberately generic over what a "key" means a per-IP
 // limiter for pre-authentication routes (login/register/refresh, where
 // no tenant exists yet) and a per-org limiter for tenant-scoped routes
 // (once step 3 exists) are the same struct with a different KeyFunc; the

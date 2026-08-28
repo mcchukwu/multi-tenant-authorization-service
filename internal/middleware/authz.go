@@ -26,7 +26,7 @@ func Authz(repo *authz.Repository, permissionKey string) func(http.Handler) http
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := requestctx.UserID(r.Context())
 			if !ok {
-				// Authn didn't run, or ran and failed to set identity —
+				// Authn didn't run, or ran and failed to set identity,
 				// either way this is a wiring bug, not a client error.
 				response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
 				return

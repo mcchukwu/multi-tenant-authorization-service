@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -11,12 +12,13 @@ import (
 
 // Create a configuration struct
 type Config struct {
-	AppName         string        `env:"APP_NAME"`
-	AppPort         string        `env:"APP_PORT"`
-	AppEnv          string        `env:"APP_ENV"`
-	DBURL           string        `env:"DB_URL"`
-	AccessTokenTTL  time.Duration `env:"ACCESS_TOKEN_TTL"`
-	RefreshTokenTTL time.Duration `env:"REFRESH_TOKEN_TTL"`
+	AppName            string        `env:"APP_NAME"`
+	AppPort            string        `env:"APP_PORT"`
+	AppEnv             string        `env:"APP_ENV"`
+	DBURL              string        `env:"DB_URL"`
+	AccessTokenTTL     time.Duration `env:"ACCESS_TOKEN_TTL"`
+	RefreshTokenTTL    time.Duration `env:"REFRESH_TOKEN_TTL"`
+	CORSAllowedOrigins []string      `env:"CORS_ALLOWED_ORIGINS"`
 }
 
 // Load() loads the configuration from the environment variables and returns the configuration struct
@@ -37,12 +39,13 @@ func Load() *Config {
 	}
 
 	return &Config{
-		AppName:         getEnv("APP_NAME", ""),
-		AppPort:         getEnv("APP_PORT", ""),
-		AppEnv:          getEnv("APP_ENV", ""),
-		DBURL:           getEnv("DB_URL", ""),
-		AccessTokenTTL:  accessTokenTTL,
-		RefreshTokenTTL: refreshTokenTTL,
+		AppName:            getEnv("APP_NAME", ""),
+		AppPort:            getEnv("APP_PORT", ""),
+		AppEnv:             getEnv("APP_ENV", ""),
+		DBURL:              getEnv("DB_URL", ""),
+		AccessTokenTTL:     accessTokenTTL,
+		RefreshTokenTTL:    refreshTokenTTL,
+		CORSAllowedOrigins: strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ","),
 	}
 }
 
@@ -59,6 +62,9 @@ func Validate(c *Config) error {
 	}
 	if c.DBURL == "" {
 		return errors.New("database url is required")
+	}
+	if len(c.CORSAllowedOrigins) == 0 {
+		return errors.New("cors allowed origins is required")
 	}
 
 	return nil

@@ -9,8 +9,9 @@ import (
 type contextKey string
 
 const (
-	userIDKey contextKey = "user_id"
-	orgIDKey  contextKey = "org_id"
+	userIDKey    contextKey = "user_id"
+	orgIDKey     contextKey = "org_id"
+	requestIDKey contextKey = "request_id"
 )
 
 // WithUserID attaches the authenticated user's ID to the request context.
@@ -39,5 +40,19 @@ func WithOrgID(ctx context.Context, id uuid.UUID) context.Context {
 // middleware hasn't run (or the route has no org scope).
 func OrgID(ctx context.Context) (uuid.UUID, bool) {
 	id, ok := ctx.Value(orgIDKey).(uuid.UUID)
+	return id, ok
+}
+
+// WithRequestID attaches the request ID. Set once, by RequestLogger, at
+// the very start of the chain — everything downstream (handlers, error
+// responses, other logging) reads it from context, not from the request
+// header directly.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey, id)
+}
+
+// RequestID reads the request ID. ok is false if RequestLogger hasn't run.
+func RequestID(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(requestIDKey).(string)
 	return id, ok
 }
