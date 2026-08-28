@@ -275,3 +275,99 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, er
 		},
 	}, nil
 }
+
+type RefreshInput struct {
+	RefreshToken string
+	UserAgent    string
+	IPAddress    string
+}
+
+type RefreshResult struct {
+	AccessToken           string
+	AccessTokenExpiresAt  time.Time
+	RefreshToken          string
+	RefreshTokenExpiresAt time.Time
+}
+
+// Refresh is the second half of the refresh-token flow. It's a separate
+// method so the caller can't accidentally reuse a refresh token to get
+// another access token, which would be a security hole.
+func (s *Service) Refresh(ctx context.Context, input RefreshInput) (*RefreshResult, error) {
+	session, err := s.repo.GetSessionByRefreshTokenHash(ctx, HashOpaqueToken(input.RefreshToken))
+	if err != nil {
+		return nil, err
+	}
+
+	if session.Revoked {
+		// This token was already rotated away, presenting it now means
+		// either it leaked and an attacker is using a stale copy, or the
+		// legitimate client retried a request whose response it never
+		// saw. Either way, the whole lineage is no longer trustworthy:
+		// revoke every session in the family, not just this one request.
+		if revokeErr := s.repo.RevokeFamily(ctx, session.TokenFamilyID); revokeErr != nil {
+			logger.Error("family revoke failed", "err", revokeErr, "family_id", session.TokenFamilyID)
+		}
+		if auditErr := s.audit.Log(ctx, &audit.LogEntry{
+			UserID:     &session.UserID,
+			Action:     "token.replay_detected",
+			EntityType: "session",
+			EntityID:   &session.ID,
+			Metadata:   map[string]any{"token_family_id": session.TokenFamilyID.String()},
+			IPAddress:  input.IPAddress,
+			UserAgent:  input.UserAgent,
+		}); auditErr != nil {
+			logger.Error("audit log write failed", "err", auditErr, "user_id", session.UserID)
+		}
+		return nil, apperrors.ErrInvalidToken
+	}
+
+	if time.Now().After(session.RefreshTokenExpiresAt) {
+		return nil, apperrors.ErrInvalidToken
+	}
+
+	rawAccess, hashedAccess, err := generateOpaqueToken()
+	if err != nil {
+		return nil, err
+	}
+	rawRefresh, hashedRefresh, err := generateOpaqueToken()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	accessExpiresAt := now.Add(s.cfg.AccessTokenTTL)
+	refreshExpiresAt := now.Add(s.cfg.RefreshTokenTTL)
+
+	// Revoke-old + insert-new must be atomic, if the revoke succeeds but
+	// the insert fails, the client is left with no valid refresh token at
+	// all and no way to recover except a fresh login.
+	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
+		txRepo := NewRepository(tx)
+
+		if err := txRepo.RevokeSession(ctx, session.ID); err != nil {
+			return err
+		}
+
+		_, err := txRepo.CreateSessionInFamily(ctx, NewSessionInFamily{
+			UserID:                session.UserID,
+			TokenFamilyID:         session.TokenFamilyID,
+			RefreshTokenHash:      hashedRefresh,
+			AccessTokenHash:       hashedAccess,
+			UserAgent:             input.UserAgent,
+			IPAddress:             input.IPAddress,
+			AccessTokenExpiresAt:  accessExpiresAt,
+			RefreshTokenExpiresAt: refreshExpiresAt,
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &RefreshResult{
+		AccessToken:           rawAccess,
+		AccessTokenExpiresAt:  accessExpiresAt,
+		RefreshToken:          rawRefresh,
+		RefreshTokenExpiresAt: refreshExpiresAt,
+	}, nil
+}

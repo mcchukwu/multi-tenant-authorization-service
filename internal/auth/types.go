@@ -49,3 +49,10 @@ type UserInfo struct {
 	FirstName string    `json:"first_name"`
 	LastName  string    `json:"last_name,omitempty"`
 }
+
+// --
+
+type RefreshResponse struct {
+	AccessToken string    `json:"access_token"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}

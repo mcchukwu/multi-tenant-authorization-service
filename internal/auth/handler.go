@@ -58,17 +58,12 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Same cookie shape as Login — registration logs the new user straight
-	// in rather than requiring a separate login call right after signup.
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    result.RefreshToken,
-		Path:     "/v1/auth",
-		HttpOnly: true,
-		Secure:   h.cfg.AppEnv == "production",
-		SameSite: http.SameSiteStrictMode,
-		Expires:  result.RefreshTokenExpiresAt,
-	})
+	csrfToken, err := newCSRFToken()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+		return
+	}
+	setAuthCookies(w, result.RefreshToken, csrfToken, result.RefreshTokenExpiresAt)
 
 	response.Success(w, http.StatusCreated, "account created", RegisterResponse{
 		AccessToken:  result.AccessToken,
@@ -104,20 +99,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Refresh token: httpOnly + Secure + SameSite=Strict cookie, scoped to
-	// the auth routes only. Because this IS a cookie, the refresh endpoint
-	// remains a CSRF target — SameSite=Strict narrows that, it doesn't
-	// close it alone, so the refresh handler needs its own explicit CSRF
-	// check when we build it next.
-	http.SetCookie(w, &http.Cookie{
-		Name:     "refresh_token",
-		Value:    result.RefreshToken,
-		Path:     "/v1/auth",
-		HttpOnly: true,
-		Secure:   h.cfg.AppEnv == "production",
-		SameSite: http.SameSiteStrictMode,
-		Expires:  result.RefreshTokenExpiresAt,
-	})
+	csrfToken, err := newCSRFToken()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+		return
+	}
+	setAuthCookies(w, result.RefreshToken, csrfToken, result.RefreshTokenExpiresAt)
 
 	// Access token: returned in the body, not a cookie — client holds it in
 	// memory and sends it as `Authorization: Bearer <token>`. Never
@@ -126,5 +113,42 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		AccessToken: result.AccessToken,
 		ExpiresAt:   result.AccessTokenExpiresAt,
 		User:        result.User,
+	})
+}
+
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	// CSRF check happens before touching the refresh token at all —
+	// no point validating a token if the request itself isn't trusted.
+	if !verifyCSRF(r) {
+		response.Error(w, http.StatusForbidden, "csrf_check_failed", "CSRF validation failed")
+		return
+	}
+
+	cookie, err := r.Cookie(refreshCookieName)
+	if err != nil || cookie.Value == "" {
+		response.Error(w, http.StatusUnauthorized, "missing_token", "Refresh token is required")
+		return
+	}
+
+	result, err := h.service.Refresh(r.Context(), RefreshInput{
+		RefreshToken: cookie.Value,
+		UserAgent:    r.UserAgent(),
+		IPAddress:    utils.ClientIP(r),
+	})
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	csrfToken, err := newCSRFToken()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+		return
+	}
+	setAuthCookies(w, result.RefreshToken, csrfToken, result.RefreshTokenExpiresAt)
+
+	response.Success(w, http.StatusOK, "token refreshed", RefreshResponse{
+		AccessToken: result.AccessToken,
+		ExpiresAt:   result.AccessTokenExpiresAt,
 	})
 }

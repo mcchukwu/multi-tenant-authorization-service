@@ -52,6 +52,7 @@ func main() {
 
 	mux.Handle("POST /auth/login", http.HandlerFunc(authHandler.Login))
 	mux.Handle("POST /auth/register", http.HandlerFunc(authHandler.Register))
+	mux.Handle("POST /auth/refresh", http.HandlerFunc(authHandler.Refresh))
 
 	v1 := http.NewServeMux()
 	v1.Handle("/v1/", http.StripPrefix("/v1", mux))

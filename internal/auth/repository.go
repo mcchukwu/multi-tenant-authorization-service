@@ -186,7 +186,7 @@ type SessionRecord struct {
 }
 
 // GetActiveSessionByAccessTokenHash looks up a session by its access token
-// hash and rejects anything that isn't currently valid — revoked or
+// hash and rejects anything that isn't currently valid, revoked or
 // expired sessions are treated identically to "no such token" so a caller
 // can't distinguish "your token was fine but the session got revoked"
 // from "that token never existed."
@@ -208,4 +208,86 @@ func (r *Repository) GetActiveSessionByAccessTokenHash(ctx context.Context, hash
 		return nil, apperrors.ErrInvalidToken
 	}
 	return &s, nil
+}
+
+type RefreshSessionRecord struct {
+	ID                    uuid.UUID
+	UserID                uuid.UUID
+	TokenFamilyID         uuid.UUID
+	Revoked               bool
+	RefreshTokenExpiresAt time.Time
+}
+
+func (r *Repository) GetSessionByRefreshTokenHash(ctx context.Context, hash string) (*RefreshSessionRecord, error) {
+	const q = `
+		SELECT id, user_id, token_family_id, revoked, refresh_token_expires_at
+		FROM sessions
+		WHERE refresh_token_hash = $1
+	`
+	var s RefreshSessionRecord
+	err := r.dbQuerier.QueryRow(ctx, q, hash).Scan(
+		&s.ID, &s.UserID, &s.TokenFamilyID, &s.Revoked, &s.RefreshTokenExpiresAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperrors.ErrInvalidToken
+		}
+		return nil, apperrors.ErrDatabase
+	}
+	return &s, nil
+}
+
+func (r *Repository) RevokeSession(ctx context.Context, sessionID uuid.UUID) error {
+	const q = `UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE id = $1 AND revoked = false`
+	if _, err := r.dbQuerier.Exec(ctx, q, sessionID); err != nil {
+		return apperrors.ErrDatabase
+	}
+	return nil
+}
+
+// RevokeFamily kills every still-active session sharing a token_family_id.
+// Called on reuse detection — the whole lineage is untrusted at that
+// point, not just the one token that got replayed, so every session in it
+// (including the legitimate client's current one) is forced to re-login.
+func (r *Repository) RevokeFamily(ctx context.Context, familyID uuid.UUID) error {
+	const q = `UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE token_family_id = $1 AND revoked = false`
+	if _, err := r.dbQuerier.Exec(ctx, q, familyID); err != nil {
+		return apperrors.ErrDatabase
+	}
+	return nil
+}
+
+type NewSessionInFamily struct {
+	UserID                uuid.UUID
+	TokenFamilyID         uuid.UUID // carried forward from the session being rotated — the reuse-detection lineage
+	RefreshTokenHash      string
+	AccessTokenHash       string
+	UserAgent             string
+	IPAddress             string
+	AccessTokenExpiresAt  time.Time
+	RefreshTokenExpiresAt time.Time
+}
+
+// CreateSessionInFamily inserts a rotated session, explicitly passing the
+// existing token_family_id — unlike CreateSession (login/register), which
+// lets the column default start a fresh lineage. Kept as a separate
+// method rather than an optional field on NewSession so the two intents
+// (start a lineage vs continue one) can't be confused for each other.
+func (r *Repository) CreateSessionInFamily(ctx context.Context, s NewSessionInFamily) (uuid.UUID, error) {
+	const q = `
+		INSERT INTO sessions (
+			user_id, token_family_id, refresh_token_hash, access_token_hash,
+			user_agent, ip_address, access_token_expires_at, refresh_token_expires_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id
+	`
+	var id uuid.UUID
+	err := r.dbQuerier.QueryRow(ctx, q,
+		s.UserID, s.TokenFamilyID, s.RefreshTokenHash, s.AccessTokenHash,
+		s.UserAgent, s.IPAddress, s.AccessTokenExpiresAt, s.RefreshTokenExpiresAt,
+	).Scan(&id)
+	if err != nil {
+		return uuid.Nil, apperrors.ErrDatabase
+	}
+	return id, nil
 }
