@@ -22,6 +22,62 @@ func NewHandler(service *Service, cfg *config.Config) *Handler {
 	}
 }
 
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	email := normalize.Email(req.Email)
+	phone, err := normalize.Phone(req.Phone, "")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid_request", "Invalid phone number")
+		return
+	}
+
+	if err := validation.ValidateStruct(req); err != nil {
+		response.ValidationError(w, err)
+		return
+	}
+
+	result, err := h.service.Register(r.Context(), RegisterInput{
+		Email:     email,
+		Phone:     phone,
+		Password:  req.Password,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		UserAgent: r.UserAgent(),
+		IPAddress: utils.ClientIP(r),
+	})
+	if err != nil {
+		// apperrors.ErrEmailTaken / ErrPhoneTaken need a case in
+		// response.HandleError mapping to http.StatusConflict (409) —
+		// add these alongside your existing error-to-status mapping.
+		response.HandleError(w, err)
+		return
+	}
+
+	// Same cookie shape as Login — registration logs the new user straight
+	// in rather than requiring a separate login call right after signup.
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    result.RefreshToken,
+		Path:     "/v1/auth",
+		HttpOnly: true,
+		Secure:   h.cfg.AppEnv == "production",
+		SameSite: http.SameSiteStrictMode,
+		Expires:  result.RefreshTokenExpiresAt,
+	})
+
+	response.Success(w, http.StatusCreated, "account created", RegisterResponse{
+		AccessToken:  result.AccessToken,
+		ExpiresAt:    result.AccessTokenExpiresAt,
+		User:         result.User,
+		Organization: result.Organization,
+	})
+}
+
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
