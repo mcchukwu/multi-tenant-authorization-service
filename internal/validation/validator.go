@@ -2,15 +2,14 @@ package validation
 
 import "github.com/go-playground/validator/v10"
 
-var Validate *validator.Validate
+var validate = validator.New()
 
-func Init() {
-	Validate = validator.New()
+func init() {
 	registerCustomValidations()
 }
 
 func ValidateStruct(data any) map[string]string {
-	err := Validate.Struct(data)
+	err := validate.Struct(data)
 	if err == nil {
 		return nil
 	}

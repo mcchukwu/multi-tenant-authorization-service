@@ -9,6 +9,7 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/validation"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
+	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
 
 type Handler struct {
@@ -29,21 +30,30 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := normalize.Email(req.Email)
-	phone, err := normalize.Phone(req.Phone, "")
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid_request", "Invalid phone number")
-		return
+	// Normalize phone number
+	if req.Phone != "" {
+		normalized, err := normalize.Phone(req.Phone, "")
+		if err != nil {
+			response.ValidationError(w, map[string]string{"phone": "must be a valid phone number"})
+			return
+		}
+		req.Phone = normalized
 	}
 
+	// Normalize email
+	if req.Email != "" {
+		req.Email = normalize.Email(req.Email)
+	}
+
+	// Validate request
 	if err := validation.ValidateStruct(req); err != nil {
 		response.ValidationError(w, err)
 		return
 	}
 
 	result, err := h.service.Register(r.Context(), RegisterInput{
-		Email:     email,
-		Phone:     phone,
+		Email:     req.Email,
+		Phone:     req.Phone,
 		Password:  req.Password,
 		FirstName: req.FirstName,
 		LastName:  req.LastName,
@@ -61,6 +71,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	csrfToken, err := newCSRFToken()
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "internal_error", "Something went wrong")
+		logger.Error("failed to generate CSRF token", "err", err.Error())
 		return
 	}
 	setAuthCookies(w, result.RefreshToken, csrfToken, result.RefreshTokenExpiresAt)

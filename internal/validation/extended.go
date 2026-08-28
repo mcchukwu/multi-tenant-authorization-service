@@ -12,10 +12,10 @@ var ngPhoneRegex = regexp.MustCompile(`^\+234[7-9]\d{9}$`)
 var emailRegex = regexp.MustCompile(`^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$`)
 
 func registerCustomValidations() {
-	Validate.RegisterValidation("ngphone", validateNGPhone)
-	Validate.RegisterValidation("phone", validatePhone)
-	Validate.RegisterValidation("identifier", validateIdentifier)
-	Validate.RegisterValidation("ngidentifier", validateNGIdentifier)
+	validate.RegisterValidation("ngphone", validateNGPhone)
+	validate.RegisterValidation("phone", validatePhone)
+	validate.RegisterValidation("identifier", validateIdentifier)
+	validate.RegisterValidation("ngidentifier", validateNGIdentifier)
 }
 
 // validateNGPhone validates a Nigerian E.164 phone number.
