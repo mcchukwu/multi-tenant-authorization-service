@@ -40,7 +40,7 @@ func main() {
 	auditService := audit.NewService(auditRepo)
 
 	authRepo := auth.NewRepository(dbPool)
-	authService := auth.NewService(authRepo, auditService, cfg)
+	authService := auth.NewService(authRepo, auditService, cfg, dbPool)
 	authHandler := auth.NewHandler(authService, cfg)
 
 	// Routing

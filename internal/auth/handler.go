@@ -2,12 +2,11 @@ package auth
 
 import (
 	"encoding/json"
-	"net"
 	"net/http"
-	"strings"
 
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/normalize"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/response"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/validation"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 )
@@ -42,7 +41,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Identifier: req.Identifier,
 		Password:   req.Password,
 		UserAgent:  r.UserAgent(),
-		IPAddress:  clientIP(r),
+		IPAddress:  utils.ClientIP(r),
 	})
 	if err != nil {
 		response.HandleError(w, err)
@@ -72,22 +71,4 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:   result.AccessTokenExpiresAt,
 		User:        result.User,
 	})
-}
-
-// clientIP prefers X-Forwarded-For (set by a reverse proxy/load balancer)
-// over RemoteAddr, since RemoteAddr is the proxy's own address once you're
-// behind one. XFF is itself spoofable by the client unless your proxy is
-// configured to overwrite rather than append to it — confirm that's true
-// of your deployment before relying on this for anything security-critical
-// like the per-tenant rate limiting you've got planned.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
