@@ -193,7 +193,6 @@ type LoginResult struct {
 func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, error) {
 	user, lookupErr := s.repo.GetUserByIdentifier(ctx, input.Identifier)
 	if lookupErr != nil && !errors.Is(lookupErr, apperrors.ErrUserNotFound) {
-		logger.Error("user lookup failed", "err", lookupErr.Error(), "identifier", input.Identifier)
 		return nil, lookupErr
 	}
 
@@ -210,7 +209,6 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, er
 
 	valid, verifyErr := VerifyPassword(passwordToVerify, input.Password)
 	if verifyErr != nil {
-		logger.Error("password verification failed", "err", verifyErr.Error())
 		return nil, apperrors.ErrInternalServer
 	}
 
@@ -224,12 +222,10 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, er
 
 	rawAccess, hashedAccess, err := generateOpaqueToken()
 	if err != nil {
-		logger.Error("opaque token generation failed", "err", err.Error(), "user_id", user.ID)
 		return nil, apperrors.ErrInternalServer
 	}
 	rawRefresh, hashedRefresh, err := generateOpaqueToken()
 	if err != nil {
-		logger.Error("opaque token generation failed", "err", err.Error(), "user_id", user.ID)
 		return nil, apperrors.ErrInternalServer
 	}
 
@@ -248,7 +244,6 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResult, er
 	}
 
 	if _, err := s.repo.CreateSession(ctx, sessionEntry); err != nil {
-		logger.Error("session creation failed", "err", err.Error(), "user_id", user.ID)
 		return nil, err
 	}
 
@@ -312,6 +307,7 @@ func (s *Service) Refresh(ctx context.Context, input RefreshInput) (*RefreshResu
 		if revokeErr := s.repo.RevokeFamily(ctx, session.TokenFamilyID); revokeErr != nil {
 			logger.Error("family revoke failed", "err", revokeErr, "family_id", session.TokenFamilyID)
 		}
+
 		if auditErr := s.audit.Log(ctx, &audit.LogEntry{
 			UserID:     &session.UserID,
 			Action:     "token.replay_detected",

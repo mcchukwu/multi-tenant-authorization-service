@@ -13,7 +13,6 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/apperrors"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
-	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
 
 type Repository struct {
@@ -138,7 +137,6 @@ func (r *Repository) GetUserByIdentifier(ctx context.Context, identifier string)
 			return nil, apperrors.ErrUserNotFound
 		}
 
-		logger.Error(err.Error())
 		return nil, apperrors.ErrDatabase
 	}
 

@@ -129,7 +129,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
-	// CSRF check happens before touching the refresh token at all —
+	// CSRF check happens before touching the refresh token at all
 	// no point validating a token if the request itself isn't trusted.
 	if !verifyCSRF(r) {
 		response.Error(w, http.StatusForbidden, "csrf_check_failed", "CSRF validation failed")
