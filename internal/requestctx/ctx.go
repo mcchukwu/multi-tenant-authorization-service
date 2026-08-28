@@ -8,21 +8,36 @@ import (
 
 type contextKey string
 
-const userIDKey contextKey = "user_id"
+const (
+	userIDKey contextKey = "user_id"
+	orgIDKey  contextKey = "org_id"
+)
 
 // WithUserID attaches the authenticated user's ID to the request context.
-// Set once, by authn middleware, after a successful token lookup — every
-// handler and authz middleware downstream reads it from here rather than
-// re-deriving it.
+// Set once, by authn middleware, after a successful token lookup.
 func WithUserID(ctx context.Context, id uuid.UUID) context.Context {
 	return context.WithValue(ctx, userIDKey, id)
 }
 
-// UserID reads the authenticated user's ID. ok is false if no authn
-// middleware has run yet — callers must check it rather than assuming a
-// zero-value UUID means "unauthenticated," since that's a silent bug
-// waiting to grant zero-value-shaped access.
+// UserID reads the authenticated user's ID. ok is false if authn
+// middleware hasn't run yet — callers must check it rather than assuming
+// a zero-value UUID means "unauthenticated."
 func UserID(ctx context.Context) (uuid.UUID, bool) {
 	id, ok := ctx.Value(userIDKey).(uuid.UUID)
+	return id, ok
+}
+
+// WithOrgID attaches the organization ID a request has been authorized
+// against. Set once, by authz middleware, after the route's org_id has
+// been validated against the user's memberships — never set this from an
+// unvalidated route parameter directly.
+func WithOrgID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, orgIDKey, id)
+}
+
+// OrgID reads the authorized organization ID. ok is false if authz
+// middleware hasn't run (or the route has no org scope).
+func OrgID(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(orgIDKey).(uuid.UUID)
 	return id, ok
 }
