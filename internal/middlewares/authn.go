@@ -55,4 +55,3 @@ func bearerToken(r *http.Request) (string, bool) {
 	}
 	return token, true
 }
-
