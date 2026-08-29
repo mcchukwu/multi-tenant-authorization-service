@@ -11,8 +11,10 @@ import (
 
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/audit"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/auth"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/authz"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/health"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/middleware"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/organization"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
@@ -41,12 +43,19 @@ func main() {
 	auditRepo := audit.NewRepository(dbPool)
 	auditService := audit.NewService(auditRepo)
 
-	authRepo := auth.NewRepository(dbPool)
-	authService := auth.NewService(authRepo, auditService, cfg, dbPool)
-	authHandler := auth.NewHandler(authService, cfg)
+	authnRepo := auth.NewRepository(dbPool)
+	authnService := auth.NewService(authnRepo, auditService, cfg, dbPool)
+	authnHandler := auth.NewHandler(authnService, cfg)
+
+	authzRepo := authz.NewRepository(dbPool)
+
+	orgRepo := organization.NewRepository(dbPool)
+	orgService := organization.NewService(orgRepo, dbPool)
+	orgHandler := organization.NewHandler(orgService)
 
 	// Middlewares
 	authIPLimiter := middleware.NewRateLimiter(5, 10)
+	orgIPLimiter := middleware.NewRateLimiter(5, 10)
 
 	// Routing
 	mux := http.NewServeMux()
@@ -57,17 +66,55 @@ func main() {
 
 	mux.Handle("POST /auth/login",
 		authIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-			http.HandlerFunc(authHandler.Login),
+			http.HandlerFunc(authnHandler.Login),
 		),
 	)
 	mux.Handle("POST /auth/register",
 		authIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-			http.HandlerFunc(authHandler.Register),
+			http.HandlerFunc(authnHandler.Register),
 		),
 	)
 	mux.Handle("POST /auth/refresh",
 		authIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-			http.HandlerFunc(authHandler.Refresh),
+			http.HandlerFunc(authnHandler.Refresh),
+		),
+	)
+
+	// Protected routes
+	mux.Handle("POST /orgs",
+		middleware.Authn(authnRepo)(
+			orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
+				http.HandlerFunc(orgHandler.Create),
+			),
+		),
+	)
+
+	// Organization routes
+	mux.Handle("GET /orgs/{org_id}",
+		middleware.Authn(authnRepo)(
+			middleware.Authz(authzRepo, "org.view")(
+				orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
+					http.HandlerFunc(orgHandler.Get),
+				),
+			),
+		),
+	)
+	mux.Handle("PATCH /orgs/{org_id}",
+		middleware.Authn(authnRepo)(
+			middleware.Authz(authzRepo, "org.update")(
+				orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
+					http.HandlerFunc(orgHandler.Update),
+				),
+			),
+		),
+	)
+	mux.Handle("DELETE /orgs/{org_id}",
+		middleware.Authn(authnRepo)(
+			middleware.Authz(authzRepo, "org.delete")(
+				orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
+					http.HandlerFunc(orgHandler.Delete),
+				),
+			),
 		),
 	)
 

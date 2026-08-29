@@ -3,27 +3,12 @@ package organization
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/apperrors"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
 )
-
-type Organization struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Slug      *string   `json:"slug,omitempty"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type UpdateOrgRequest struct {
-	Name string `json:"name" validate:"required"`
-}
 
 type Repository struct {
 	db db.Querier
@@ -72,7 +57,7 @@ func (r *Repository) UpdateName(ctx context.Context, orgID uuid.UUID, name strin
 	return &o, nil
 }
 
-// SoftDelete marks the org deleted rather than removing the row —
+// SoftDelete marks the org deleted rather than removing the row,
 // organizations.status already models this (active/suspended/deleted),
 // and a hard DELETE would cascade-orphan every audit_logs/authz_decisions
 // row referencing it, destroying exactly the audit trail the CV bullet
@@ -119,12 +104,12 @@ func (r *Repository) AddOwnerMembership(ctx context.Context, orgID, userID, role
 }
 
 // Bootstrap creates a new organization of the given type and assigns
-// userID as its owner — org insert, owner-role lookup, and owner
+// userID as its owner, org insert, owner-role lookup, and owner
 // membership insert, as one unit. This is the single implementation of
 // "stand up a new org with an owner," used both by registration (type
 // "personal", composed inside auth's larger user+org+session
 // transaction) and standalone org creation (type "business", its own
-// transaction). Bootstrap doesn't start a transaction itself — callers
+// transaction). Bootstrap doesn't start a transaction itself, callers
 // compose it into whichever transaction they're already running via
 // NewRepository(tx).
 func (r *Repository) Bootstrap(ctx context.Context, name, orgType string, ownerUserID uuid.UUID) (uuid.UUID, error) {

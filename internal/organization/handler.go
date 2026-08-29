@@ -5,14 +5,11 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/apperrors"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/requestctx"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/response"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/validation"
 )
-
-type CreateOrgRequest struct {
-	Name string `json:"name" validate:"required"`
-}
 
 type Handler struct {
 	service *Service
@@ -29,13 +26,13 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requestctx.UserID(r.Context())
 	if !ok {
-		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		response.HandleError(w, apperrors.ErrUnauthorized)
 		return
 	}
 
 	var req CreateOrgRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
 	if err := validation.ValidateStruct(req); err != nil {
@@ -54,7 +51,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	orgID, err := uuid.Parse(r.PathValue("org_id"))
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid_org_id", "Invalid organization ID")
+		response.HandleError(w, apperrors.ErrOrganizationIDInvalid)
 		return
 	}
 	org, err := h.service.Get(r.Context(), orgID)
@@ -68,13 +65,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	orgID, err := uuid.Parse(r.PathValue("org_id"))
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid_org_id", "Invalid organization ID")
+		response.HandleError(w, apperrors.ErrOrganizationIDInvalid)
 		return
 	}
 
 	var req UpdateOrgRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		response.HandleError(w, apperrors.ErrInvalidRequestBody)
 		return
 	}
 	if err := validation.ValidateStruct(req); err != nil {
@@ -93,12 +90,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	orgID, err := uuid.Parse(r.PathValue("org_id"))
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid_org_id", "Invalid organization ID")
+		response.HandleError(w, apperrors.ErrOrganizationIDInvalid)
 		return
 	}
 	if err := h.service.Delete(r.Context(), orgID); err != nil {
 		response.HandleError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	response.Success(w, http.StatusNoContent, "organization deleted", nil)
 }
