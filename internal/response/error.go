@@ -105,6 +105,8 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusConflict, "must_transfer_ownership", "transfer ownership before leaving this workspace")
 	case errors.Is(err, apperrors.ErrOwnershipTransferInvalid):
 		Error(w, http.StatusConflict, "ownership_transfer_invalid", "the selected member cannot receive ownership")
+	case errors.Is(err, apperrors.ErrCannotDeletePersonalOrg):
+		Error(w, http.StatusConflict, "cannot_delete_personal_org", "cannot delete personal organization")
 
 	// MEMBERSHIPS
 	case errors.Is(err, apperrors.ErrMembershipNotFound):

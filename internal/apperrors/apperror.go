@@ -53,6 +53,8 @@ var (
 
 	ErrOrganizationNameInvalid = errors.New("organization name is invalid")
 
+	ErrCannotDeletePersonalOrg = errors.New("cannot delete personal organization")
+
 	// ErrInviteNotFound is the COLLAPSED 404 for the public invite lookup and
 	// accept flows: disabled/unknown/deleted/suspended/personal all resolve
 	// to this single code (anti-enumeration). Also returned by PATCH invite
@@ -106,4 +108,3 @@ var (
 
 	ErrDatabase = errors.New("database error")
 )
-
