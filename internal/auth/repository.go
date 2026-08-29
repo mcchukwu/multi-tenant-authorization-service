@@ -60,47 +60,6 @@ func (r *Repository) CreateUser(ctx context.Context, u NewUser) (uuid.UUID, erro
 	return id, nil
 }
 
-// CreateOrganization inserts a new organization row. For a 'personal' org
-// this fires the organizations_provision_roles trigger synchronously,
-// within the same transaction — by the time this returns, the org already
-// has its own cloned owner/admin/member/viewer roles.
-func (r *Repository) CreateOrganization(ctx context.Context, name, orgType string) (uuid.UUID, error) {
-	const q = `
-		INSERT INTO organizations (name, type)
-		VALUES ($1, $2)
-		RETURNING id
-	`
-	var id uuid.UUID
-	if err := r.dbQuerier.QueryRow(ctx, q, name, orgType).Scan(&id); err != nil {
-		return uuid.Nil, apperrors.ErrDatabase
-	}
-	return id, nil
-}
-
-// GetRoleIDByKind looks up a role by its stable kind (not name) within a
-// specific org — this is the kind column earning its keep: reliable even
-// if the org later renames its roles.
-func (r *Repository) GetRoleIDByKind(ctx context.Context, orgID uuid.UUID, kind string) (uuid.UUID, error) {
-	const q = `SELECT id FROM roles WHERE organization_id = $1 AND kind = $2`
-	var id uuid.UUID
-	if err := r.dbQuerier.QueryRow(ctx, q, orgID, kind).Scan(&id); err != nil {
-		return uuid.Nil, apperrors.ErrDatabase
-	}
-	return id, nil
-}
-
-// CreateMembership links a user to an org under a given role.
-func (r *Repository) CreateMembership(ctx context.Context, userID, orgID, roleID uuid.UUID) error {
-	const q = `
-		INSERT INTO memberships (user_id, organization_id, role_id, status)
-		VALUES ($1, $2, $3, 'active')
-	`
-	if _, err := r.dbQuerier.Exec(ctx, q, userID, orgID, roleID); err != nil {
-		return apperrors.ErrDatabase
-	}
-	return nil
-}
-
 type userRecord struct {
 	ID           uuid.UUID
 	PasswordHash string

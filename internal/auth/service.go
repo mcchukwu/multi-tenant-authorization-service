@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/apperrors"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/audit"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/organization"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
 )
@@ -79,10 +80,10 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (*RegisterR
 	// pgx.Tx already satisfies db.Querier structurally, so no wrapper
 	// type is needed to hand it to NewRepository.
 	err = pgx.BeginFunc(ctx, s.dbPool, func(tx pgx.Tx) error {
-		txRepo := NewRepository(tx)
+		userRepo := NewRepository(tx)
 		var err error
 
-		userID, err = txRepo.CreateUser(ctx, NewUser{
+		userID, err = userRepo.CreateUser(ctx, NewUser{
 			Email:        input.Email,
 			Phone:        input.Phone,
 			PasswordHash: passwordHash,
@@ -93,21 +94,11 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (*RegisterR
 			return err
 		}
 
+		orgRepo := organization.NewRepository(tx)
+
 		orgName = fmt.Sprintf("%s's Workspace", input.FirstName)
-		orgID, err = txRepo.CreateOrganization(ctx, orgName, "personal")
+		orgID, err = orgRepo.Bootstrap(ctx, orgName, "personal", userID)
 		if err != nil {
-			return err
-		}
-
-		// The organizations_provision_roles trigger has already cloned the
-		// template roles into this org synchronously, within this same
-		// transaction, by the time CreateOrganization's INSERT returned.
-		ownerRoleID, err := txRepo.GetRoleIDByKind(ctx, orgID, "owner")
-		if err != nil {
-			return err
-		}
-
-		if err := txRepo.CreateMembership(ctx, userID, orgID, ownerRoleID); err != nil {
 			return err
 		}
 
@@ -125,7 +116,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (*RegisterR
 		accessExpiresAt = now.Add(s.cfg.AccessTokenTTL)
 		refreshExpiresAt = now.Add(s.cfg.RefreshTokenTTL)
 
-		_, err = txRepo.CreateSession(ctx, &NewSession{
+		_, err = userRepo.CreateSession(ctx, &NewSession{
 			UserID:                userID,
 			RefreshTokenHash:      hashedRefresh,
 			AccessTokenHash:       hashedAccess,
