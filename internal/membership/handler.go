@@ -3,27 +3,12 @@ package membership
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/requestctx"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/response"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/validation"
 )
-
-type InviteRequest struct {
-	RoleID string `json:"role_id" validate:"required,uuid"`
-}
-
-type InviteResponse struct {
-	Token     string    `json:"token"`
-	RoleID    string    `json:"role_id"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
-type AssignRoleRequest struct {
-	RoleID string `json:"role_id" validate:"required,uuid"`
-}
 
 type Handler struct {
 	service *Service
@@ -108,6 +93,38 @@ func (h *Handler) Accept(w http.ResponseWriter, r *http.Request) {
 	}
 	response.Success(w, http.StatusOK, "invitation accepted", map[string]string{
 		"organization_id": orgID.String(),
+	})
+}
+
+// RotateInvite requires the invitation's ID in the route and uses the
+// same member.invite permission as creating a fresh invite. Rotating is
+// conceptually "issue a new invite that replaces this one," not a
+// separate capability.
+func (h *Handler) RotateInvite(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(r.PathValue("org_id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid_org_id", "Invalid organization ID")
+		return
+	}
+	invitationID, err := uuid.Parse(r.PathValue("invitation_id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid_invitation_id", "Invalid invitation ID")
+		return
+	}
+	actorID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		return
+	}
+
+	result, err := h.service.RotateInvite(r.Context(), orgID, actorID, invitationID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+	response.Success(w, http.StatusOK, "invitation rotated", InviteResponse{
+		Token:     result.Token,
+		ExpiresAt: result.ExpiresAt,
 	})
 }
 

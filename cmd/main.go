@@ -16,6 +16,7 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/membership"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/middleware"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/organization"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/role"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/routes"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
@@ -49,6 +50,8 @@ func main() {
 	authHandler := auth.NewHandler(authService, cfg)
 
 	authzRepo := authz.NewRepository(dbPool)
+	authzService := authz.NewService(authzRepo)
+	authzHandler := authz.NewHandler(authzService)
 
 	orgRepo := organization.NewRepository(dbPool)
 	orgService := organization.NewService(orgRepo, dbPool)
@@ -57,6 +60,12 @@ func main() {
 	membershipRepo := membership.NewRepository(dbPool)
 	membershipService := membership.NewService(membershipRepo, dbPool)
 	membershipHandler := membership.NewHandler(membershipService)
+
+	roleRepo := role.NewRepository(dbPool)
+	roleService := role.NewService(roleRepo)
+	roleHandler := role.NewHandler(roleService)
+
+	auditHandler := audit.NewHandler(auditRepo)
 
 	// Rate limiters - one instance per key strategy, reused across every
 	// route that shares it
@@ -73,8 +82,11 @@ func main() {
 		AuthHandler:       authHandler,
 		AuthRepo:          authRepo,
 		AuthzRepo:         authzRepo,
+		AuthzHandler:      authzHandler,
+		AuditHandler:      auditHandler,
 		OrgHandler:        orgHandler,
 		MembershipHandler: membershipHandler,
+		RoleHandler:       roleHandler,
 		AuthIPLimiter:     authIPLimiter,
 		OrgRateLimiter:    orgRateLimiter,
 	})

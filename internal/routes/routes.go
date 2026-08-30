@@ -3,12 +3,14 @@ package routes
 import (
 	"net/http"
 
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/audit"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/auth"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/authz"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/health"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/membership"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/middleware"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/organization"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/role"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 )
 
@@ -21,8 +23,11 @@ type Dependencies struct {
 	AuthHandler       *auth.Handler
 	AuthRepo          *auth.Repository
 	AuthzRepo         *authz.Repository
+	AuthzHandler      *authz.Handler
+	AuditHandler      *audit.Handler
 	OrgHandler        *organization.Handler
 	MembershipHandler *membership.Handler
+	RoleHandler       *role.Handler
 
 	AuthIPLimiter  *middleware.RateLimiter
 	OrgRateLimiter *middleware.RateLimiter
@@ -91,6 +96,14 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 		),
 	)
 
+	// Cross-tenant by nature, no {org_id} to scope against, same
+	// reasoning as Create.
+	mux.Handle("GET /me/organizations",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.OrgHandler.ListMine),
+		),
+	)
+
 	mux.Handle("GET /orgs/{org_id}",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -152,6 +165,46 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			middleware.Authn(d.AuthRepo)(
 				middleware.Authz(d.AuthzRepo, "member.assign_role")(
 					http.HandlerFunc(d.MembershipHandler.AssignRole),
+				),
+			),
+		),
+	)
+	mux.Handle("POST /orgs/{org_id}/invitations/{invitation_id}/rotate",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "member.invite")(
+					http.HandlerFunc(d.MembershipHandler.RotateInvite),
+				),
+			),
+		),
+	)
+	// Roles: read-only, role administration is out of scope for now
+	mux.Handle("GET /orgs/{org_id}/roles",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "role.view")(
+					http.HandlerFunc(d.RoleHandler.List),
+				),
+			),
+		),
+	)
+
+	// Audit trail: the read side of what Log/RecordDecision have
+	// been writing since login and Authz middleware were first built
+	mux.Handle("GET /orgs/{org_id}/audit-logs",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "audit_log.view")(
+					http.HandlerFunc(d.AuditHandler.List),
+				),
+			),
+		),
+	)
+	mux.Handle("GET /orgs/{org_id}/authz-decisions",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "audit_log.view")(
+					http.HandlerFunc(d.AuthzHandler.List),
 				),
 			),
 		),

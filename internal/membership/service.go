@@ -35,7 +35,7 @@ type InviteResult struct {
 }
 
 // Invite creates a rotatable link invitation. Only an owner can invite
-// someone in as another owner — the generic member.invite permission
+// someone in as another owner, the generic member.invite permission
 // proves the caller can invite people at all, not that they're trusted
 // to mint new owners specifically. That distinction has to be enforced
 // here, since role_permissions has no concept of "grant this permission,
@@ -71,7 +71,7 @@ func (s *Service) Invite(ctx context.Context, orgID, inviterID, roleID uuid.UUID
 // Accept turns a valid invitation into a membership. Marking the
 // invitation accepted and inserting the membership happen in one
 // transaction, so a token can't be redeemed twice even under two
-// concurrent requests racing on the same link — the second request's
+// concurrent requests racing on the same link. The second request's
 // MarkInvitationAccepted finds zero rows affected (status is no longer
 // 'active') and the whole transaction rolls back.
 func (s *Service) Accept(ctx context.Context, userID uuid.UUID, rawToken string) (uuid.UUID, error) {
@@ -175,7 +175,53 @@ func (s *Service) AssignRole(ctx context.Context, orgID, actorID, targetUserID, 
 	})
 }
 
-// newInviteToken is deliberately separate from auth's token generation —
+// RotateInvite revokes an org's existing active invitation and issues a
+// new token on the same role grant, same revoke and reissue pattern
+// refresh token rotation uses, and the same owner target restriction as
+// creating a fresh invite (an admin still can't mint access to the owner
+// role, whether by inviting fresh or rotating an existing invite).
+func (s *Service) RotateInvite(ctx context.Context, orgID, actorID, invitationID uuid.UUID) (*InviteResult, error) {
+	inv, err := s.repo.GetInvitationByID(ctx, orgID, invitationID)
+	if err != nil {
+		return nil, err
+	}
+
+	targetKind, err := s.repo.GetRoleKindByID(ctx, orgID, inv.RoleID)
+	if err != nil {
+		return nil, err
+	}
+	if targetKind == "owner" {
+		actorKind, err := s.repo.GetMemberRoleKind(ctx, orgID, actorID)
+		if err != nil {
+			return nil, err
+		}
+		if actorKind != "owner" {
+			return nil, apperrors.ErrOwnerActionRestricted
+		}
+	}
+
+	rawToken, err := newInviteToken()
+	if err != nil {
+		return nil, err
+	}
+	expiresAt := time.Now().Add(invitationTTL)
+
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		txRepo := NewRepository(tx)
+		if err := txRepo.RevokeInvitation(ctx, inv.ID); err != nil {
+			return err
+		}
+		_, err := txRepo.CreateLinkInvitation(ctx, orgID, inv.RoleID, actorID, auth.HashOpaqueToken(rawToken), expiresAt)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &InviteResult{Token: rawToken, ExpiresAt: expiresAt}, nil
+}
+
+// newInviteToken is deliberately separate from auth's token generation,
 // it needs the same random-generation shape but none of the opaque
 // session-token semantics, and importing auth only for HashOpaqueToken
 // (used above, at storage time) keeps that dependency to exactly the one

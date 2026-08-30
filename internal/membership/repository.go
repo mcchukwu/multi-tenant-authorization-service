@@ -11,26 +11,6 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
 )
 
-type Member struct {
-	UserID    uuid.UUID `json:"user_id"`
-	Email     string    `json:"email"`
-	FirstName string    `json:"first_name"`
-	LastName  string    `json:"last_name"`
-	RoleID    uuid.UUID `json:"role_id"`
-	RoleName  string    `json:"role_name"`
-	RoleKind  string    `json:"role_kind"`
-	Status    string    `json:"status"`
-	JoinedAt  time.Time `json:"joined_at"`
-}
-
-type Invitation struct {
-	ID             uuid.UUID
-	OrganizationID uuid.UUID
-	RoleID         uuid.UUID
-	Status         string
-	ExpiresAt      time.Time
-}
-
 type Repository struct {
 	db db.Querier
 }
@@ -69,7 +49,7 @@ func (r *Repository) ListMembers(ctx context.Context, orgID uuid.UUID) ([]Member
 	return out, nil
 }
 
-// GetMemberRoleKind returns a member's role kind — used to enforce the
+// GetMemberRoleKind returns a member's role kind, used to enforce the
 // owner-specific business rules that sit above the generic permission
 // check: only an owner can grant the owner role, and the last owner
 // can't be removed or demoted.
@@ -106,7 +86,7 @@ func (r *Repository) GetRoleKindByID(ctx context.Context, orgID, roleID uuid.UUI
 
 // CountActiveOwners locks the counted rows (FOR UPDATE) so two concurrent
 // remove/demote requests against the same org can't both read "2 owners"
-// and both proceed — this is the row lock the earlier design conversation
+// and both proceed, this is the row lock the earlier design conversation
 // flagged as necessary, not optional, for the invariant to actually hold
 // under concurrency. Must be called inside a transaction (the lock is
 // released at commit/rollback).
@@ -129,7 +109,7 @@ func (r *Repository) CountActiveOwners(ctx context.Context, orgID uuid.UUID) (in
 }
 
 // RemoveMember hard-deletes the membership row. The audit_logs entry
-// written alongside this (see Service.Remove) is the historical record —
+// written alongside this (see Service.Remove) is the historical record,
 // there's no need for the membership row itself to persist in a
 // "removed" state, and membership_status has no such state to put it in.
 func (r *Repository) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) error {
@@ -168,8 +148,8 @@ func (r *Repository) CreateMembership(ctx context.Context, orgID, userID, roleID
 }
 
 // CreateLinkInvitation stores the invitation's token *hash*, reusing
-// auth.HashOpaqueToken so every token in this system — session, refresh,
-// invite — is hashed with the same algorithm before it ever touches the
+// auth.HashOpaqueToken so every token in this system. Session, refresh,
+// invite, is hashed with the same algorithm before it ever touches the
 // database, and a leaked DB never hands out a usable invite link.
 func (r *Repository) CreateLinkInvitation(ctx context.Context, orgID, roleID, createdBy uuid.UUID, tokenHash string, expiresAt time.Time) (uuid.UUID, error) {
 	const q = `
@@ -202,6 +182,41 @@ func (r *Repository) GetActiveInvitationByTokenHash(ctx context.Context, tokenHa
 	return &inv, nil
 }
 
+// GetInvitationByID scopes by (id, organization_id). Same IDOR pattern
+// as every other org-scoped lookup in this codebase: an invitation ID
+// from a different org returns "not found," not the invitation.
+func (r *Repository) GetInvitationByID(ctx context.Context, orgID, invitationID uuid.UUID) (*Invitation, error) {
+	const q = `
+		SELECT id, organization_id, role_id, status, expires_at
+		FROM invitations
+		WHERE id = $1 AND organization_id = $2
+	`
+	var inv Invitation
+	err := r.db.QueryRow(ctx, q, invitationID, orgID).Scan(&inv.ID, &inv.OrganizationID, &inv.RoleID, &inv.Status, &inv.ExpiresAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apperrors.ErrOrganizationNotFound
+		}
+		return nil, apperrors.ErrDatabase
+	}
+	return &inv, nil
+}
+
+// RevokeInvitation is the "nullify" half of "rotate and nullify the
+// initial link", matches the same revoke and reissue shape used
+// throughout: sessions on refresh, invitations here.
+func (r *Repository) RevokeInvitation(ctx context.Context, invitationID uuid.UUID) error {
+	const q = `UPDATE invitations SET status = 'revoked' WHERE id = $1 AND status = 'active'`
+	tag, err := r.db.Exec(ctx, q, invitationID)
+	if err != nil {
+		return apperrors.ErrDatabase
+	}
+	if tag.RowsAffected() == 0 {
+		return apperrors.ErrInvalidToken
+	}
+	return nil
+}
+
 func (r *Repository) MarkInvitationAccepted(ctx context.Context, invitationID uuid.UUID) error {
 	const q = `UPDATE invitations SET status = 'accepted' WHERE id = $1 AND status = 'active'`
 	tag, err := r.db.Exec(ctx, q, invitationID)
@@ -209,8 +224,8 @@ func (r *Repository) MarkInvitationAccepted(ctx context.Context, invitationID uu
 		return apperrors.ErrDatabase
 	}
 	if tag.RowsAffected() == 0 {
-		// Already accepted/revoked/expired by the time this ran —
-		// treated as an invalid token, same as one that never existed.
+		// Already accepted/revoked/expired by the time this ran.
+		// Treated as an invalid token, same as one that never existed.
 		return apperrors.ErrInvalidToken
 	}
 	return nil
