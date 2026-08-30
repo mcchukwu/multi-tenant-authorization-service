@@ -72,6 +72,10 @@ var (
 	// the client/owner role). Maps to 409.
 	ErrOwnershipTransferInvalid = errors.New("ownership transfer target is invalid")
 
+	ErrLastOwner = errors.New("last owner cannot be removed")
+
+	ErrOwnerActionRestricted = errors.New("owner action restricted")
+
 	// MEMBERSHIPS
 	ErrMembershipNotFound = errors.New("membership not found")
 
@@ -103,7 +107,8 @@ var (
 	ErrRateLimited = errors.New("too many requests")
 
 	// SYSTEM
-	ErrInternalServer   = errors.New("internal server error")
+	ErrInternalServer = errors.New("internal server error")
+
 	ErrMethodNotAllowed = errors.New("method not allowed")
 
 	ErrDatabase = errors.New("database error")

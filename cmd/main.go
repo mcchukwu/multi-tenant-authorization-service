@@ -13,9 +13,10 @@ import (
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/auth"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/authz"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/health"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/membership"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/middleware"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/organization"
-	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/routes"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/config"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/logger"
@@ -43,9 +44,9 @@ func main() {
 	auditRepo := audit.NewRepository(dbPool)
 	auditService := audit.NewService(auditRepo)
 
-	authnRepo := auth.NewRepository(dbPool)
-	authnService := auth.NewService(authnRepo, auditService, cfg, dbPool)
-	authnHandler := auth.NewHandler(authnService, cfg)
+	authRepo := auth.NewRepository(dbPool)
+	authService := auth.NewService(authRepo, auditService, cfg, dbPool)
+	authHandler := auth.NewHandler(authService, cfg)
 
 	authzRepo := authz.NewRepository(dbPool)
 
@@ -53,99 +54,53 @@ func main() {
 	orgService := organization.NewService(orgRepo, dbPool)
 	orgHandler := organization.NewHandler(orgService)
 
-	// Middlewares
+	membershipRepo := membership.NewRepository(dbPool)
+	membershipService := membership.NewService(membershipRepo, dbPool)
+	membershipHandler := membership.NewHandler(membershipService)
+
+	// Rate limiters - one instance per key strategy, reused across every
+	// route that shares it
 	authIPLimiter := middleware.NewRateLimiter(5, 10)
-	orgIPLimiter := middleware.NewRateLimiter(5, 10)
+	orgRateLimiter := middleware.NewRateLimiter(5, 10)
 
 	// Routing
-	mux := http.NewServeMux()
+	rootMux := http.NewServeMux()
+	routes.RegisterHealthRoutes(rootMux, healthHandler)
 
-	mux.HandleFunc("GET /health", healthHandler.Health)
-	mux.HandleFunc("GET /health/live", healthHandler.Live)
-	mux.HandleFunc("GET /health/ready", healthHandler.Ready)
+	apiMux := http.NewServeMux()
+	routes.RegisterAPIRoutes(apiMux, routes.Dependencies{
+		HealthHandler:     healthHandler,
+		AuthHandler:       authHandler,
+		AuthRepo:          authRepo,
+		AuthzRepo:         authzRepo,
+		OrgHandler:        orgHandler,
+		MembershipHandler: membershipHandler,
+		AuthIPLimiter:     authIPLimiter,
+		OrgRateLimiter:    orgRateLimiter,
+	})
 
-	mux.Handle("POST /auth/login",
-		authIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-			http.HandlerFunc(authnHandler.Login),
-		),
-	)
-	mux.Handle("POST /auth/register",
-		authIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-			http.HandlerFunc(authnHandler.Register),
-		),
-	)
-	mux.Handle("POST /auth/refresh",
-		authIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-			http.HandlerFunc(authnHandler.Refresh),
-		),
-	)
-
-	// Protected routes
-	mux.Handle("POST /orgs",
-		middleware.Authn(authnRepo)(
-			orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-				http.HandlerFunc(orgHandler.Create),
-			),
-		),
-	)
-
-	// Organization routes
-	mux.Handle("GET /orgs/{org_id}",
-		middleware.Authn(authnRepo)(
-			middleware.Authz(authzRepo, "org.view")(
-				orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-					http.HandlerFunc(orgHandler.Get),
-				),
-			),
-		),
-	)
-	mux.Handle("PATCH /orgs/{org_id}",
-		middleware.Authn(authnRepo)(
-			middleware.Authz(authzRepo, "org.update")(
-				orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-					http.HandlerFunc(orgHandler.Update),
-				),
-			),
-		),
-	)
-	mux.Handle("DELETE /orgs/{org_id}",
-		middleware.Authn(authnRepo)(
-			middleware.Authz(authzRepo, "org.delete")(
-				orgIPLimiter.Middleware(func(r *http.Request) string { return utils.ClientIP(r) })(
-					http.HandlerFunc(orgHandler.Delete),
-				),
-			),
-		),
-	)
-
-	// Handler stack
-	handlerStack := middleware.Recovery(
+	apiStack := middleware.Recovery(
 		middleware.RequestLogger(
 			middleware.SecurityHeaders(
 				middleware.CORS(middleware.CORSConfig{
 					AllowedOrigins: cfg.CORSAllowedOrigins,
-				})(
-					mux,
-				),
+				})(apiMux),
 			),
 		),
 	)
-
-	v1 := http.NewServeMux()
-	v1.Handle("/v1/", http.StripPrefix("/v1", handlerStack))
+	rootMux.Handle("/v1/", http.StripPrefix("/v1", apiStack))
 
 	// Server
 	server := &http.Server{
 		Addr:    ":" + cfg.AppPort,
-		Handler: v1,
+		Handler: rootMux,
 	}
 
 	// Start Server
 	serverErr := make(chan error, 1)
 	go func() {
 		logger.Info("Server is running...")
-		err := server.ListenAndServe()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}
 	}()
@@ -171,14 +126,12 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Stop accepting new HTTP requests and wait for active requests to finish
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("Server failed to shutdown")
 		os.Exit(1)
 	}
 	logger.Info("Server stopped")
 
-	// The HTTP server has finished, so nothing should still be using the database through HTTP handlers.
 	dbPool.Close()
 	logger.Info("Database closed")
 	logger.Info("Application shutdown completed")

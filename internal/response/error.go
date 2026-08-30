@@ -103,6 +103,10 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusNotFound, "invite_not_found", "invite not found")
 	case errors.Is(err, apperrors.ErrMustTransferOwnership):
 		Error(w, http.StatusConflict, "must_transfer_ownership", "transfer ownership before leaving this workspace")
+	case errors.Is(err, apperrors.ErrLastOwner):
+		Error(w, http.StatusConflict, "last_owner", "last owner cannot be removed")
+	case errors.Is(err, apperrors.ErrOwnerActionRestricted):
+		Error(w, http.StatusForbidden, "owner_action_restricted", "owner action restricted")
 	case errors.Is(err, apperrors.ErrOwnershipTransferInvalid):
 		Error(w, http.StatusConflict, "ownership_transfer_invalid", "the selected member cannot receive ownership")
 	case errors.Is(err, apperrors.ErrCannotDeletePersonalOrg):
