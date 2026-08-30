@@ -18,8 +18,6 @@ import (
 // middleware. main.go builds this once at startup; this package only
 // reads from it.
 type Dependencies struct {
-	HealthHandler *health.Handler
-
 	AuthHandler       *auth.Handler
 	AuthRepo          *auth.Repository
 	AuthzRepo         *authz.Repository

@@ -78,7 +78,6 @@ func main() {
 
 	apiMux := http.NewServeMux()
 	routes.RegisterAPIRoutes(apiMux, routes.Dependencies{
-		HealthHandler:     healthHandler,
 		AuthHandler:       authHandler,
 		AuthRepo:          authRepo,
 		AuthzRepo:         authzRepo,
