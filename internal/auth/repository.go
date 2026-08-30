@@ -32,7 +32,7 @@ type NewUser struct {
 }
 
 // CreateUser inserts a new user row. Relies on the database's UNIQUE
-// constraints on email/phone rather than a pre-check, a check-then-insert
+// constraints on email/phone rather than a pre-check, a check then insert
 // pattern has a race window under concurrent registrations for the same
 // email or phone; catching the constraint violation on insert doesn't.
 func (r *Repository) CreateUser(ctx context.Context, u NewUser) (uuid.UUID, error) {
@@ -114,7 +114,7 @@ type NewSession struct {
 
 // CreateSession inserts a new session row, starting a fresh token_family_id
 // we never pass a family_id in on initial login. Rotation (in the future
-// lineage — the column's own DEFAULT gen_random_uuid() handles that, since
+// lineage, the column's own DEFAULT gen_random_uuid() handles that, since
 // refresh handler) is the one place that must carry an existing family_id
 // forward explicitly rather than letting a new one default in; that's what
 // keeps the reuse-detection design intact.
@@ -210,7 +210,7 @@ func (r *Repository) RevokeSession(ctx context.Context, sessionID uuid.UUID) err
 }
 
 // RevokeFamily kills every still-active session sharing a token_family_id.
-// Called on reuse detection — the whole lineage is untrusted at that
+// Called on reuse detection, the whole lineage is untrusted at that
 // point, not just the one token that got replayed, so every session in it
 // (including the legitimate client's current one) is forced to re-login.
 func (r *Repository) RevokeFamily(ctx context.Context, familyID uuid.UUID) error {
@@ -233,7 +233,7 @@ type NewSessionInFamily struct {
 }
 
 // CreateSessionInFamily inserts a rotated session, explicitly passing the
-// existing token_family_id — unlike CreateSession (login/register), which
+// existing token_family_id, unlike CreateSession (login/register), which
 // lets the column default start a fresh lineage. Kept as a separate
 // method rather than an optional field on NewSession so the two intents
 // (start a lineage vs continue one) can't be confused for each other.
@@ -254,4 +254,47 @@ func (r *Repository) CreateSessionInFamily(ctx context.Context, s NewSessionInFa
 		return uuid.Nil, apperrors.ErrDatabase
 	}
 	return id, nil
+}
+
+type SessionSummary struct {
+	ID        uuid.UUID
+	UserAgent string
+	IPAddress string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+func (r *Repository) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]SessionSummary, error) {
+	const q = `
+		SELECT id, user_agent, ip_address, created_at, refresh_token_expires_at
+		FROM sessions
+		WHERE user_id = $1 AND revoked = false
+		ORDER BY created_at DESC
+	`
+	rows, err := r.dbQuerier.Query(ctx, q, userID)
+	if err != nil {
+		return nil, apperrors.ErrDatabase
+	}
+	defer rows.Close()
+
+	var out []SessionSummary
+	for rows.Next() {
+		var s SessionSummary
+		if err := rows.Scan(&s.ID, &s.UserAgent, &s.IPAddress, &s.CreatedAt, &s.ExpiresAt); err != nil {
+			return nil, apperrors.ErrDatabase
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.ErrDatabase
+	}
+	return out, nil
+}
+
+func (r *Repository) RevokeAllSessionsForUser(ctx context.Context, userID uuid.UUID) error {
+	const q = `UPDATE sessions SET revoked = true, revoked_at = NOW() WHERE user_id = $1 AND revoked = false`
+	if _, err := r.dbQuerier.Exec(ctx, q, userID); err != nil {
+		return apperrors.ErrDatabase
+	}
+	return nil
 }

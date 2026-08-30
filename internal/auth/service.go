@@ -363,3 +363,18 @@ func (s *Service) Refresh(ctx context.Context, input RefreshInput) (*RefreshResu
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	}, nil
 }
+
+// Logout revokes exactly the session the caller is currently
+// authenticated with, RevokeSession already exists (built for refresh
+// rotation).
+func (s *Service) Logout(ctx context.Context, sessionID uuid.UUID) error {
+	return s.repo.RevokeSession(ctx, sessionID)
+}
+
+func (s *Service) LogoutAll(ctx context.Context, userID uuid.UUID) error {
+	return s.repo.RevokeAllSessionsForUser(ctx, userID)
+}
+
+func (s *Service) ListSessions(ctx context.Context, userID uuid.UUID) ([]SessionSummary, error) {
+	return s.repo.ListActiveSessions(ctx, userID)
+}

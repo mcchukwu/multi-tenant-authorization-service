@@ -35,6 +35,7 @@ func Authn(repo *auth.Repository) func(http.Handler) http.Handler {
 			}
 
 			ctx := requestctx.WithUserID(r.Context(), session.UserID)
+			ctx = requestctx.WithSessionID(ctx, session.ID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/normalize"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/requestctx"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/response"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/validation"
@@ -163,4 +164,62 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		AccessToken: result.AccessToken,
 		ExpiresAt:   result.AccessTokenExpiresAt,
 	})
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	sessionID, ok := requestctx.SessionID(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		return
+	}
+	if err := h.service.Logout(r.Context(), sessionID); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+	clearAuthCookies(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) LogoutAll(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		return
+	}
+	if err := h.service.LogoutAll(r.Context(), userID); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+	clearAuthCookies(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		return
+	}
+	// ok deliberately unchecked here — a missing current session ID just
+	// means nothing gets marked Current, not an error worth failing on.
+	currentSessionID, _ := requestctx.SessionID(r.Context())
+
+	sessions, err := h.service.ListSessions(r.Context(), userID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+
+	out := make([]SessionResponse, len(sessions))
+	for i, s := range sessions {
+		out[i] = SessionResponse{
+			ID:        s.ID.String(),
+			UserAgent: s.UserAgent,
+			IPAddress: s.IPAddress,
+			CreatedAt: s.CreatedAt,
+			ExpiresAt: s.ExpiresAt,
+			Current:   s.ID == currentSessionID,
+		}
+	}
+	response.Success(w, http.StatusOK, "sessions retrieved", out)
 }

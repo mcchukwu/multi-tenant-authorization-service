@@ -12,6 +12,7 @@ const (
 	userIDKey    contextKey = "user_id"
 	orgIDKey     contextKey = "org_id"
 	requestIDKey contextKey = "request_id"
+	sessionIDKey contextKey = "session_id"
 )
 
 // WithUserID attaches the authenticated user's ID to the request context.
@@ -54,5 +55,17 @@ func WithRequestID(ctx context.Context, id string) context.Context {
 // RequestID reads the request ID. ok is false if RequestLogger hasn't run.
 func RequestID(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(requestIDKey).(string)
+	return id, ok
+}
+
+// WithSessionID attaches the current session's ID — set once, by Authn,
+// alongside the user ID. Logout uses this to revoke exactly the session
+// the caller is currently using, without a second token-hash lookup.
+func WithSessionID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, sessionIDKey, id)
+}
+
+func SessionID(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(sessionIDKey).(uuid.UUID)
 	return id, ok
 }

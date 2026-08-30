@@ -30,10 +30,33 @@ func setAuthCookies(w http.ResponseWriter, refreshToken, csrfToken string, expir
 		Name:     csrfCookieName,
 		Value:    csrfToken,
 		Path:     authCookiePath,
-		HttpOnly: false, // must be readable by JS — it's echoed back in a header, not a secret credential on its own
+		HttpOnly: false, // It's echoed back in a header, not a secret credential on its own
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  expiresAt,
+	})
+}
+
+// clearAuthCookies expires both cookies immediately. Used by logout and
+// logout-all. MaxAge -1 tells the browser to delete the cookie now,
+// rather than waiting for the Expires timestamp to pass.
+func clearAuthCookies(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     authCookiePath,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    "",
+		Path:     authCookiePath,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
 	})
 }
 

@@ -57,6 +57,23 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 		),
 	)
 
+	// Session/device management, Authn only, no {org_id}
+	mux.Handle("POST /auth/logout",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.AuthHandler.Logout),
+		),
+	)
+	mux.Handle("POST /auth/logout-all",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.AuthHandler.LogoutAll),
+		),
+	)
+	mux.Handle("GET /auth/sessions",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.AuthHandler.ListSessions),
+		),
+	)
+
 	// Invitation accept: no {org_id} exists yet at this point
 	mux.Handle("POST /auth/invitations/{token}/accept",
 		d.AuthIPLimiter.Middleware(ipKey)(
@@ -140,4 +157,3 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 		),
 	)
 }
-

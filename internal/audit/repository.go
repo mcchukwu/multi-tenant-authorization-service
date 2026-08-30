@@ -3,18 +3,17 @@ package audit
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mcchukwu/multi-tenant-authorization-service/internal/apperrors"
 	"github.com/mcchukwu/multi-tenant-authorization-service/pkg/db"
 )
 
 type Repository struct {
-	db *pgxpool.Pool
+	dbQuerier db.Querier
 }
 
-func NewRepository(db *pgxpool.Pool) *Repository {
+func NewRepository(db db.Querier) *Repository {
 	return &Repository{
-		db: db,
+		dbQuerier: db,
 	}
 }
 
@@ -22,7 +21,7 @@ func (r *Repository) Log(ctx context.Context, logEntry LogEntry, metadata []byte
 	ctx, cancel := db.WithDBTimeout(ctx)
 	defer cancel()
 
-	_, err := r.db.Exec(ctx, `
+	_, err := r.dbQuerier.Exec(ctx, `
 		INSERT INTO audit_logs (
 			organization_id, 
 			user_id, 
