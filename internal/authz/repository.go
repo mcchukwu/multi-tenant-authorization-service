@@ -42,17 +42,38 @@ func (r *Repository) CheckPermission(ctx context.Context, userID, orgID uuid.UUI
 	return allowed, nil
 }
 
-type Decision struct {
-	OrganizationID uuid.UUID
-	UserID         uuid.UUID
-	PermissionKey  string
-	ResourceType   string // empty string stored as NULL
-	ResourceID     *uuid.UUID
-	Allowed        bool
-	Reason         string
+// ListForOrg reads back the full decision trail, this is what makes
+// "full audit trail of every authorization decision" a checkable claim.
+// Every check Authz middleware runs, allowed or denied, lands here.
+func (r *Repository) ListForOrg(ctx context.Context, orgID uuid.UUID, limit, offset int) ([]DecisionView, error) {
+	const q = `
+		SELECT id, user_id, permission_key, resource_type, resource_id, allowed, reason, created_at
+		FROM authz_decisions
+		WHERE organization_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := r.db.Query(ctx, q, orgID, limit, offset)
+	if err != nil {
+		return nil, apperrors.ErrDatabase
+	}
+	defer rows.Close()
+
+	var out []DecisionView
+	for rows.Next() {
+		var d DecisionView
+		if err := rows.Scan(&d.ID, &d.UserID, &d.PermissionKey, &d.ResourceType, &d.ResourceID, &d.Allowed, &d.Reason, &d.CreatedAt); err != nil {
+			return nil, apperrors.ErrDatabase
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.ErrDatabase
+	}
+	return out, nil
 }
 
-// RecordDecision writes every authorization check — allowed or denied —
+// RecordDecision writes every authorization check, allowed or denied
 // to authz_decisions. This is the audit trail the CV bullet actually
 // means: not just "who got denied," but a complete record of every
 // access decision the system made, so a security review can answer
@@ -74,4 +95,3 @@ func (r *Repository) RecordDecision(ctx context.Context, d Decision) error {
 	}
 	return nil
 }
-
