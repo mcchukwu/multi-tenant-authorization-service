@@ -19,7 +19,7 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// Create is Authn-only, never wrapped in Authz — there's no {org_id} to
+// Create is Authn-only, never wrapped in Authz, there's no {org_id} to
 // scope against yet, since the whole point of this route is to make one.
 // Any authenticated user can create a business org; type is never read
 // from the request (see Service.Create).
@@ -46,6 +46,22 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.Success(w, http.StatusCreated, "organization created", org)
+}
+
+// ListMine is Authn-only, no Authz, same reasoning as Create: there's
+// no single {org_id} for this request to be scoped against.
+func (h *Handler) ListMine(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		return
+	}
+	orgs, err := h.service.ListForUser(r.Context(), userID)
+	if err != nil {
+		response.HandleError(w, err)
+		return
+	}
+	response.Success(w, http.StatusOK, "organizations retrieved", orgs)
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {

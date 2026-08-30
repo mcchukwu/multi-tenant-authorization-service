@@ -22,11 +22,15 @@ func (s *Service) Get(ctx context.Context, orgID uuid.UUID) (*Organization, erro
 	return s.repo.GetByID(ctx, orgID)
 }
 
-// Create always creates a "business" org — orgType is never a parameter
+func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
+	return s.repo.ListForUser(ctx, userID)
+}
+
+// Create always creates a "business" org, orgType is never a parameter
 // here and never comes from the request. "personal" is reachable through
 // exactly one path: the registration flow, once, per user. This function
 // signature is what actually enforces that, not a validation check that
-// could be bypassed — there's simply no argument through which a caller
+// could be bypassed, there's simply no argument through which a caller
 // could ask for "personal".
 func (s *Service) Create(ctx context.Context, ownerUserID uuid.UUID, name string) (*Organization, error) {
 	var orgID uuid.UUID
@@ -48,7 +52,7 @@ func (s *Service) UpdateName(ctx context.Context, orgID uuid.UUID, name string) 
 
 // Delete refuses to delete a personal organization. It's created
 // automatically at registration and tied to a user's identity in this
-// system — there's always supposed to be exactly one per user, so
+// system, there's always supposed to be exactly one per user, so
 // deleting it isn't a supported operation regardless of who's asking or
 // what permission they hold.
 func (s *Service) Delete(ctx context.Context, orgID uuid.UUID) error {

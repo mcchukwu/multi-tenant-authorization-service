@@ -83,6 +83,38 @@ func (r *Repository) Create(ctx context.Context, name, orgType string) (uuid.UUI
 	return id, nil
 }
 
+// ListForUser is the one query in this package that's inherently
+// cross-tenant, every other method scopes to a single org_id; this one
+// joins from the caller's own memberships instead, since "which orgs am
+// I in" has no single org to scope against by definition.
+func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
+	const q = `
+		SELECT o.id, o.name, o.type, o.slug, o.status, o.created_at, o.updated_at
+		FROM organizations o
+		JOIN memberships m ON m.organization_id = o.id
+		WHERE m.user_id = $1 AND m.status = 'active' AND o.status != 'deleted'
+		ORDER BY o.created_at ASC
+	`
+	rows, err := r.db.Query(ctx, q, userID)
+	if err != nil {
+		return nil, apperrors.ErrDatabase
+	}
+	defer rows.Close()
+
+	var out []Organization
+	for rows.Next() {
+		var o Organization
+		if err := rows.Scan(&o.ID, &o.Name, &o.Type, &o.Slug, &o.Status, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			return nil, apperrors.ErrDatabase
+		}
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperrors.ErrDatabase
+	}
+	return out, nil
+}
+
 func (r *Repository) GetRoleIDByKind(ctx context.Context, orgID uuid.UUID, kind string) (uuid.UUID, error) {
 	const q = `SELECT id FROM roles WHERE organization_id = $1 AND kind = $2`
 	var id uuid.UUID

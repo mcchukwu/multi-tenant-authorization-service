@@ -1,6 +1,10 @@
 package audit
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type LogEntry struct {
 	OrganizationID *uuid.UUID
@@ -11,6 +15,18 @@ type LogEntry struct {
 	Metadata       map[string]any
 	IPAddress      string
 	UserAgent      string
+}
+
+type LogEntryView struct {
+	ID         uuid.UUID      `json:"id"`
+	UserID     *uuid.UUID     `json:"user_id,omitempty"`
+	Action     string         `json:"action"`
+	EntityType string         `json:"entity_type"`
+	EntityID   *uuid.UUID     `json:"entity_id,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	IPAddress  string         `json:"ip_address"`
+	UserAgent  string         `json:"user_agent"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 /* CREATE TABLE audit_logs (
