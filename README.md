@@ -6,31 +6,30 @@ organizations, and invite members into roles backed by a permission catalog; eve
 authorization decision is written to an auditable trail. The security story is the
 point: opaque revocable tokens with refresh rotation, double-submit CSRF protection,
 token-replay detection, IDOR-resistant org scoping, and a documented threat model
-([THREAT_MODEL.md](THREAT_MODEL.md)) — each threat matched to a concrete mitigation and
+([THREAT_MODEL.md](THREAT_MODEL.md)); each threat matched to a concrete mitigation and
 an integration test that proves it.
 
-This repository is the implementation behind three claims that matter:
+The build is split into three areas:
 
-- **RBAC + audit trail** — org-scoped roles with a seeded permission catalog
+- **RBAC + audit trail.** Org-scoped roles with a seeded permission catalog
   (`org.*`, `member.*`, `role.*`, `audit_log.view`, plus a domain-agnostic
-  `resource.*` set) and a complete `authz_decisions` trail recording **every** check,
-  allowed *and* denied (`GET /v1/orgs/{org_id}/authz-decisions`).
-- **Threat model + mitigations** — session fixation, CSRF, token replay, and
+  `resource.*` set) and a complete `authz_decisions` trail recording **every**
+  check, allowed *and* denied (`GET /v1/orgs/{org_id}/authz-decisions`).
+- **Threat model + mitigations.** Session fixation, CSRF, token replay, and
   IDOR-based privilege escalation, each with an implemented mitigation and a
-  verification path. See [THREAT_MODEL.md](THREAT_MODEL.md) and
-  [SECURITY_SCAN.md](SECURITY_SCAN.md) (the report of the security-verification pass).
-- **Refresh rotation + rate limiting** — refresh tokens rotate on every use and carry a
-  `token_family_id`; replaying a revoked token revokes the whole family. Rate limiting is
-  token-bucket (5 rps, burst 10): per client IP on pre-tenant auth routes, per
-  organization on every `{org_id}`-scoped route.
+  verification path. See [THREAT_MODEL.md](THREAT_MODEL.md).
+- **Refresh rotation + rate limiting.** Refresh tokens rotate on every use and
+  carry a `token_family_id`; replaying a revoked token revokes the whole family.
+  Rate limiting is token-bucket (5 rps, burst 10): per client IP on pre-tenant
+  auth routes, per organization on every `{org_id}`-scoped route.
 
 > **Scope honesty (read before you judge).** There are **no resource endpoints** in this
-> build — the original task list's `resource.create/get/update/delete` are not
-> implemented, and the `resource.*` permissions are seeded but unused. What *is*
-> implemented and tested is the authorization *engine*: tenants, roles, permissions,
-> membership, invitations, sessions, and the decision trail. Also deliberately absent:
-> role administration (create/edit/delete custom roles), password change/reset, and
-> ownership transfer — see [What's deliberately not built](#whats-deliberately-not-built).
+> build: `resource.create/get/update/delete` are not implemented, and the `resource.*`
+> permissions are seeded but unused. What *is* implemented and tested is the authorization
+> *engine*: tenants, roles, permissions, membership, invitations, sessions, and the
+> decision trail. Also deliberately absent: role administration (create/edit/delete custom
+> roles), password change/reset, and ownership transfer; see
+> [What's deliberately not built](#whats-deliberately-not-built).
 
 ---
 
@@ -40,7 +39,7 @@ This repository is the implementation behind three claims that matter:
 
 Every domain repository (`auth`, `organization`, `membership`, `authz`, `audit`, `role`)
 is constructed against `db.Querier` (`pkg/db/dbquerier.go`), an interface satisfied by
-both `*pgxpool.Pool` and `pgx.Tx`. Repositories **never start transactions** — the
+both `*pgxpool.Pool` and `pgx.Tx`. Repositories **never start transactions**; the
 service layer composes them with `pgx.BeginFunc`, handing `NewRepository(tx)` to each
 domain repo it needs inside the same unit of work.
 
@@ -51,7 +50,7 @@ domain repo it needs inside the same unit of work.
   inserts the membership in one transaction, so a token can't be redeemed twice even
   under a concurrent race.
 - Refresh rotation (`auth.Service.Refresh`) revokes the old session and inserts the
-  rotated one atomically — a half-rotated session would leave the client with nothing.
+  rotated one atomically. A half-rotated session would leave the client with nothing.
 
 This is the pattern that keeps multi-domain operations atomic without leaking
 transaction logic into repositories.
@@ -61,8 +60,8 @@ transaction logic into repositories.
 Repositories never query by a bare ID when the ID is org-scoped. `GetInvitationByID`,
 `GetRoleKindByID`, `RemoveMember`, and the rest always pair the resource ID with the
 org ID from the authenticated route. A resource belonging to a different org therefore
-returns **exactly the same "not found"** as a nonexistent ID — the system does not just
-authorize correctly, it makes cross-org and nonexistent targets *indistinguishable*
+returns **exactly the same "not found"** as a nonexistent ID. The system does not just
+authorize correctly; it makes cross-org and nonexistent targets *indistinguishable*
 (anti-enumeration). The `Authz` middleware validates the caller's active membership
 against `{org_id}` before any handler runs, so the raw path parameter is never trusted.
 
@@ -73,21 +72,21 @@ owner rules live in `internal/membership/service.go` and run inside transactions
 a row-locked owner count (`CountActiveOwners ... FOR UPDATE`, in the membership
 repository):
 
-- The last owner can never be removed, demoted, **or leave** — `409 last_owner`, on
+- The last owner can never be removed, demoted, **or leave**: `409 last_owner` on
   `Remove`, `AssignRole`, and the self-service `Leave` endpoint alike.
 - Only an owner can grant **or** revoke the owner role, remove an owner, or
-  invite/rotate into the owner role — `403 owner_action_restricted` (owner-only in
-  both directions: granting *and* revoking owner status).
-- Personal organizations (created once per user at registration) can never be deleted —
-  `409 cannot_delete_personal_org` — and never accept members: `Invite` returns
+  invite/rotate into the owner role: `403 owner_action_restricted` (owner-only in
+  both directions, granting *and* revoking owner status).
+- Personal organizations (created once per user at registration) can never be deleted
+  (`409 cannot_delete_personal_org`) and never accept members: `Invite` returns
   `409 personal_workspace`; `type` is never read from any request.
 
 ### Tokens: opaque and revocable, not JWTs
 
 Passwords are argon2id-hashed (`internal/auth/password.go`, `m=19456,t=2,p=1`, PHC
 format, constant-time compare, dummy-hash timing equalization on login). Session tokens
-are **256-bit random opaque tokens, stored as SHA-256 hashes** (`internal/auth/tokens.go`)
-— deliberately *not* JWTs, because a server-side session row gives immediate revocation:
+are **256-bit random opaque tokens, stored as SHA-256 hashes** (`internal/auth/tokens.go`),
+deliberately *not* JWTs, because a server-side session row gives immediate revocation:
 `Authn` looks the session up by hash and rejects anything revoked or expired, so a
 logged-out token dies instantly, no blacklist, no TTL grace. The raw token exists only
 in memory and in the one response that returns it; a leaked database hands out no usable
@@ -96,7 +95,7 @@ tokens.
 ### CSRF: double-submit cookie, enforced on the one cookie-authenticated route
 
 Access tokens travel in the `Authorization` header (never auto-attached by browsers, so
-no CSRF exposure). The refresh token travels in an `HttpOnly` cookie — and
+no CSRF exposure). The refresh token travels in an `HttpOnly` cookie, and
 `POST /v1/auth/refresh` is therefore protected by a double-submit check
 (`internal/auth/csrf.go` + `cookies.go`): the client must echo the JS-readable
 `csrf_token` cookie in the `X-CSRF-Token` header, compared with
@@ -124,10 +123,10 @@ keyed by `utils.ClientIP` (prefers `X-Forwarded-For`) for auth routes and by the
 ### Route design: `{org_id}` in the path
 
 Org-scoped routes carry the tenant in the path (`Go 1.22+` `r.PathValue`) rather than a
-header — a deliberate structural choice: the authz middleware reads it from one place,
-logs it in the decision trail, and keys rate limiting off it. Two routes are inherently
-cross-tenant and take no `{org_id}`: `POST /orgs` and `GET /me/organizations` (both
-Authn-only); the invitation-accept route resolves the org from the token instead.
+header. This is a deliberate structural choice: the authz middleware reads it from one
+place, logs it in the decision trail, and keys rate limiting off it. Two routes are
+inherently cross-tenant and take no `{org_id}`: `POST /orgs` and `GET /me/organizations`
+(both Authn-only); the invitation-accept route resolves the org from the token instead.
 
 ---
 
@@ -136,7 +135,7 @@ Authn-only); the invitation-accept route resolves the org from the token instead
 ### Prerequisites
 
 - **Go 1.26+** (the module declares `go 1.26.2` in `go.mod`)
-- **Docker** — for the local PostgreSQL (via `compose.yaml`) and for the integration
+- **Docker**: for the local PostgreSQL (via `compose.yaml`) and for the integration
   test suite, which spins up a throwaway `postgres:18` container
 
 ### Environment variables
@@ -146,15 +145,15 @@ working directory). This is the **real, complete** list from `pkg/config/config.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `APP_NAME` | yes | — | Application name (only validated non-empty). |
-| `APP_PORT` | yes | — | HTTP listen port, e.g. `6070`. |
-| `APP_ENV` | yes | — | Must be `production` or `development` (validated). |
-| `DB_URL` | yes | — | Full PostgreSQL DSN, e.g. `postgres://mtas:mtas@localhost:5432/mtas?sslmode=disable`. |
+| `APP_NAME` | yes | none | Application name (only validated non-empty). |
+| `APP_PORT` | yes | none | HTTP listen port, e.g. `6070`. |
+| `APP_ENV` | yes | none | Must be `production` or `development` (validated). |
+| `DB_URL` | yes | none | Full PostgreSQL DSN, e.g. `postgres://mtas:mtas@localhost:5432/mtas?sslmode=disable`. |
 | `JWT_ACCESS_TTL` | no | `10m` | Access token lifetime (`time.ParseDuration` format). |
 | `JWT_REFRESH_TTL` | no | `720h` | Refresh token / session lifetime. |
-| `CORS_ALLOWED_ORIGINS` | yes | — | Comma-separated origin allowlist (non-empty required). |
+| `CORS_ALLOWED_ORIGINS` | yes | none | Comma-separated origin allowlist (non-empty required). |
 
-**Known mismatch:** `.env.example` in this repo is stale — it documents
+**Known mismatch:** `.env.example` in this repo is stale: it documents
 `DATABASE_URL`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_PORT`, `ACCESS_TOKEN_TTL`, and
 `REFRESH_TOKEN_TTL`, none of which `pkg/config` reads (the code reads `DB_URL` and
 `JWT_ACCESS_TTL`/`JWT_REFRESH_TTL`). `compose.yaml` *does* read `DB_NAME` / `DB_USER` /
@@ -183,9 +182,9 @@ DB_PORT=5432
 # 1. Start PostgreSQL (reads DB_* vars from .env)
 docker compose up -d
 
-# 2. Apply migrations — there is no migrate tool in this repo; the four
-#    migrations run in order (the integration harness applies them the same way).
-#    With the compose container:
+# 2. Apply migrations (no migrate tool in this repo; the four
+#    migrations run in order, the same way the integration harness
+#    applies them). With the compose container:
 for f in migrations/*.up.sql; do
   docker exec -i mtas-postgres psql -U "$DB_USER" -d "$DB_NAME" < "$f"
 done
@@ -209,7 +208,7 @@ curl -s -X POST localhost:6070/v1/auth/register \
 
 ## API reference
 
-The full OpenAPI 3.1 spec is in **[openapi.yaml](openapi.yaml)** — every endpoint,
+The full OpenAPI 3.1 spec is in **[openapi.yaml](openapi.yaml)**: every endpoint,
 schema (derived from the Go request/response types), permission requirement, status
 code, and error code, with realistic examples. There is **no Swagger UI / Redoc server
 in this repo**; to view it, load `openapi.yaml` into any OpenAPI viewer, e.g.:
@@ -236,7 +235,7 @@ Quick orientation (all API routes are under `/v1`):
 Response envelopes (verified from `internal/response/`): success is
 `{"success": true, "message": ..., "data": ...}`; errors are
 `{"success": false, "error": {"code": ..., "message": ...}}`; validation failures add a
-`fields` map keyed by Go struct field name. `request_id` is **not** in the body — it's
+`fields` map keyed by Go struct field name. `request_id` is **not** in the body; it's
 echoed in the `X-Request-ID` response header. 204 responses have no body.
 
 ## Testing and security verification
@@ -248,7 +247,7 @@ go test ./integration/...     # end-to-end against a real postgres:18 container
 ```
 
 The integration suite (`integration/`) runs the **exact** handler + middleware stack
-from `cmd/main.go` against a real PostgreSQL in Docker — no mocks, real SQL, real
+from `cmd/main.go` against a real PostgreSQL in Docker: no mocks, real SQL, real
 migrations (applied with the simple query protocol, because pgx's default extended
 protocol rejects multi-statement files). It skips
 gracefully with a clear message if Docker is unavailable. Because the auth-route rate
@@ -257,34 +256,29 @@ a unique XFF address, which isolates tests and makes the rate-limit test determi
 
 Security-specific tests worth knowing:
 
-- `TestAuthRefresh_CSRFEnforcement` — double-submit CSRF on `/auth/refresh`
-- `TestAuthRefresh_ReplayRevokesWholeFamily` — refresh rotation + reuse detection
+- `TestAuthRefresh_CSRFEnforcement`: double-submit CSRF on `/auth/refresh`
+- `TestAuthRefresh_ReplayRevokesWholeFamily`: refresh rotation + reuse detection
 - `TestIDOR_CrossOrgMemberDeleteIs404`, `TestNonMemberOrgAccess`,
-  `TestCrossOrgIsolation_ListIsScopedToOrg` — tenant isolation / IDOR
+  `TestCrossOrgIsolation_ListIsScopedToOrg`: tenant isolation / IDOR
 - `TestLastOwnerCannotBeRemovedOrDemoted`, `TestOwnerActionRestricted`,
-  `TestPersonalOrgInvariants` — owner invariants
+  `TestPersonalOrgInvariants`: owner invariants
 - `TestLeaveOrg_AnyMemberCanLeaveAndOrgAccessIsRevoked`,
-  `TestLeaveOrg_LastOwnerCannotLeave`, `TestLeaveOrg_NonMemberGets404` — the leave endpoint
-- `TestRateLimiting_OrgRouteBurst`, `TestRateLimiting_IsKeyedPerIP` — rate limiting
+  `TestLeaveOrg_LastOwnerCannotLeave`, `TestLeaveOrg_NonMemberGets404`: the leave endpoint
+- `TestRateLimiting_OrgRouteBurst`, `TestRateLimiting_IsKeyedPerIP`: rate limiting
 
-**Threat model:** [THREAT_MODEL.md](THREAT_MODEL.md) — each of the four named threats,
+**Threat model:** [THREAT_MODEL.md](THREAT_MODEL.md) covers the four named threats,
 the exact mitigation with file/function references, and a reproduction you can run.
-**Security scan:** [SECURITY_SCAN.md](SECURITY_SCAN.md) — the report of the
-security-verification pass: the four named threats manually verified (HELD), the
-automated ZAP component blocked by environment network limits, and known defects
-K1–K6 assessed by severity (K1–K5 fixed since the scan; K6 remains as a documented
-accepted risk).
 
 ## What's deliberately not built
 
-- **Role administration** — `role.create/update/delete` are seeded permissions but
+- **Role administration**: `role.create/update/delete` are seeded permissions but
   there are no endpoints to create/edit/delete custom roles; `GET /roles` is read-only.
-- **Resource endpoints** — no resource API exists (see scope note at the top); the
+- **Resource endpoints**: no resource API exists (see scope note at the top); the
   `resource.*` permissions and `authz_decisions.resource_type/resource_id` columns are
   placeholders for a future domain layer.
-- **Password change / reset** — no such endpoints; credentials are only set at
+- **Password change / reset**: no such endpoints; credentials are only set at
   registration and checked at login.
-- **A dedicated ownership-transfer endpoint** — there is no separate "transfer
+- **A dedicated ownership-transfer endpoint**: there is no separate "transfer
   ownership" call; ownership changes are done by composing `AssignRole` (grant the
   owner role to someone else) with `Leave` or `Remove`. Members can leave an org on
   their own via `POST /orgs/{org_id}/leave`; the last owner cannot (`409 last_owner`).
@@ -297,22 +291,22 @@ Five defects found and pinned by the earlier test pass have been **fixed** in th
 working tree (verified by source inspection; the suite now asserts the corrected
 behavior):
 
-1. **Registration without `last_name` → 500 — FIXED.** `users.last_name` is now
+1. **Registration without `last_name` → 500, FIXED.** `users.last_name` is now
    nullable (`migrations/000001`) and an omitted `last_name` is stored as NULL, matching
    the request validation; registration returns 201.
    (`TestRegisterWithoutLastName_Succeeds`)
-2. **Accepting a second invitation into an org you already belong to → 500 — FIXED.**
+2. **Accepting a second invitation into an org you already belong to → 500, FIXED.**
    `CreateMembership` now translates the memberships `UNIQUE(user_id, organization_id)`
    violation to `409 already_member`.
-3. **Personal orgs accepting members — FIXED.** `Service.Invite` now blocks personal
+3. **Personal orgs accepting members, FIXED.** `Service.Invite` now blocks personal
    orgs with `409 personal_workspace` before any invitation row is created.
    (`TestPersonalOrgInvariants`)
-4. **Non-owner demoting an owner — FIXED.** `AssignRole` now applies the owner-only
+4. **Non-owner demoting an owner, FIXED.** `AssignRole` now applies the owner-only
    restriction in **both** directions: granting *and* revoking owner status require an
    owner actor, so an admin demoting an owner gets `403 owner_action_restricted` (the
    last-owner guard, `409 last_owner`, still protects the org's final owner).
    (`TestOwnerActionRestricted`)
-5. **Suspended-user login → 500 — FIXED.** `Login` returns `ErrUserSuspended` for any
+5. **Suspended-user login → 500, FIXED.** `Login` returns `ErrUserSuspended` for any
    `status != 'active'` account; `response.HandleError` now maps it to
    `403 user_suspended`, so a suspended account gets a clear, distinct error instead of
    a generic 500. (`TestLogin_SuspendedUserReturns403`)

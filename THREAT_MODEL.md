@@ -1,7 +1,7 @@
 # Threat Model — Multi-Tenant Authorization Service
 
-This document maps the four threats claimed for this service — **session fixation,
-CSRF, token replay, and IDOR-based privilege escalation** — to the concrete
+This document maps the four threats claimed for this service (session fixation,
+CSRF, token replay, and IDOR-based privilege escalation) to the concrete
 implementations that mitigate them, and gives a reproduction you can run against the
 service to verify each one. It ends with the defense-in-depth patterns (owner
 invariants, collapsed-error scoping) and an honest list of residual risks found by the
@@ -13,7 +13,7 @@ cross-checked against the integration tests in `integration/`. Where a claim rel
 test, the test name is cited. Where the evidence is weaker, it says so.
 
 The service model, briefly: an opaque access token (`Authorization: Bearer <token>`,
-DB-backed, instantly revocable — not a JWT) plus a rotating refresh token in an
+DB-backed, instantly revocable, not a JWT) plus a rotating refresh token in an
 `HttpOnly` cookie. Org-scoped routes require both authentication and a specific
 permission in the target organization. See [README.md](README.md) and
 [openapi.yaml](openapi.yaml) for the full surface.
@@ -43,7 +43,7 @@ authentication event mints a brand-new session:
   can set in advance.
 - **Fresh session per login/register.** `Repository.CreateSession`
   (`internal/auth/repository.go`) inserts a new `sessions` row with a **new**
-  `token_family_id` on every login and registration — the column default
+  `token_family_id` on every login and registration; the column default
   `gen_random_uuid()` is used, and a family ID is only carried forward by the rotation
   path (`CreateSessionInFamily`), which is itself only reachable with a valid refresh
   token. An attacker's pre-set "session" state cannot survive into an authenticated
@@ -57,7 +57,7 @@ authentication event mints a brand-new session:
 ### How to verify
 
 ```bash
-# login twice as the same user — the two sessions must be distinct rows with
+# login twice as the same user; the two sessions must be distinct rows with
 # distinct access tokens and distinct refresh-token families:
 curl -s -c jar1.txt -X POST localhost:6070/v1/auth/login -H 'Content-Type: application/json' \
   -d '{"identifier":"ada@example.com","password":"Sup3rSecret!123"}'
@@ -75,7 +75,7 @@ curl -s -H "Authorization: Bearer <token1>" localhost:6070/v1/me/organizations
 ```
 
 **Test coverage:** `TestAuthLifecycle_RegisterLoginRefreshLogout`
-(`integration/auth_test.go`) — fresh token per login, two live sessions, exact-one
+(`integration/auth_test.go`): fresh token per login, two live sessions, exact-one
 `current`, post-logout rejection. Honest caveat: there is **no dedicated
 session-fixation test**; the property is covered indirectly by the lifecycle test and by
 the fact that no code path accepts a client-supplied session ID.
@@ -100,7 +100,7 @@ which browsers never attach automatically). That one endpoint is protected by a
 
 - On login/register/refresh, the server sets two cookies
   (`setAuthCookies`, `internal/auth/cookies.go`): `refresh_token` (`HttpOnly`) and
-  `csrf_token` (JS-readable — its job is to be echoed back, so it must be readable by
+  `csrf_token` (JS-readable; its job is to be echoed back, so it must be readable by
   same-origin script).
 - `verifyCSRF` (`internal/auth/cookies.go`) requires the `X-CSRF-Token` header to equal
   the `csrf_token` cookie, compared with `subtle.ConstantTimeCompare`. A cross-site
@@ -136,7 +136,7 @@ curl -i -b jar.txt -X POST localhost:6070/v1/auth/refresh -H "X-CSRF-Token: <val
 # -> HTTP/1.1 200, token refreshed, both cookies re-issued
 ```
 
-**Test coverage:** `TestAuthRefresh_CSRFEnforcement` (`integration/auth_test.go`) — no
+**Test coverage:** `TestAuthRefresh_CSRFEnforcement` (`integration/auth_test.go`): no
 header → 403, wrong header → 403, matching header → 200.
 
 ---
@@ -159,7 +159,7 @@ Refresh tokens **rotate on every use**, and reuse is treated as theft:
   A refresh token is valid for exactly one use.
 - **Reuse detection → whole-family revocation.** If the presented refresh token hashes
   to a `revoked` session, the service assumes the token leaked (or a legitimate client
-  retried a lost response) and calls `RevokeFamily(ctx, session.TokenFamilyID)` — every
+  retried a lost response) and calls `RevokeFamily(ctx, session.TokenFamilyID)`. Every
   session sharing the family, including the legitimate rotated one, is revoked. The
   event is written to the audit log with action `token.replay_detected` and
   `token_family_id` metadata. The client gets the same `401 invalid_token` it would get
@@ -179,7 +179,7 @@ Refresh tokens **rotate on every use**, and reuse is treated as theft:
 curl -s -c jar1.txt -X POST localhost:6070/v1/auth/register -H 'Content-Type: application/json' \
   -d '{"email":"ada@example.com","password":"Sup3rSecret!123","first_name":"Ada","last_name":"Lovelace"}'
 
-# 2. refresh once — succeeds, rotates to generation 2 (jar2):
+# 2. refresh once (succeeds, rotates to generation 2, jar2):
 curl -s -c jar2.txt -b jar1.txt -X POST localhost:6070/v1/auth/refresh \
   -H "X-CSRF-Token: <gen1 csrf from jar1.txt>"
 # -> 200
@@ -190,7 +190,7 @@ curl -i -b jar1.txt -X POST localhost:6070/v1/auth/refresh \
   -H "X-CSRF-Token: <gen1 csrf from jar1.txt>"
 # -> HTTP/1.1 401 {"success":false,"error":{"code":"invalid_token","message":"invalid token"}}
 
-# 4. the KEY assertion — the legitimate generation-2 token is now dead too:
+# 4. key assertion: the legitimate generation-2 token is now dead too:
 curl -i -b jar2.txt -X POST localhost:6070/v1/auth/refresh \
   -H "X-CSRF-Token: <gen2 csrf from jar2.txt>"
 # -> HTTP/1.1 401 invalid_token   (family revocation)
@@ -201,7 +201,7 @@ curl -s -H "Authorization: Bearer <gen2 access token>" localhost:6070/v1/me/orga
 ```
 
 **Test coverage:** `TestAuthRefresh_ReplayRevokesWholeFamily` (`integration/auth_test.go`)
-— exactly the sequence above, including the family-revocation assertion.
+runs exactly the sequence above, including the family-revocation assertion.
 `TestAuthLifecycle_RegisterLoginRefreshLogout` covers post-logout access-token
 revocation. `TestInviteFlow_SingleUseToken` covers single-use invitation tokens.
 
@@ -214,7 +214,7 @@ revocation. `TestInviteFlow_SingleUseToken` covers single-use invitation tokens.
 Insecure Direct Object Reference: an authenticated user accesses or mutates another
 tenant's resources by substituting IDs (an org ID, member ID, role ID, or invitation ID)
 that they shouldn't be able to reach. "Privilege escalation" here is the cross-tenant
-flavor — using your access in org A to touch org B.
+flavor: using your access in org A to touch org B.
 
 ### The mitigation
 
@@ -223,19 +223,19 @@ Three layers, each verifiable:
 1. **Membership-gated authorization before any handler runs.** `Authz` middleware
    (`internal/middleware/authz.go`) parses `{org_id}` from the route, calls
    `CheckPermission(userID, orgID, permissionKey)`, and only then sets the trusted org
-   ID on the request context. The raw path parameter is never trusted by handlers —
+   ID on the request context. The raw path parameter is never trusted by handlers;
    `requestctx.OrgID` is set once, by Authz, after validation. A caller who is not an
    active member of the org gets `403 forbidden` regardless of what the handler would
    do. `CheckPermission` is a single parameterized query joining
    memberships → role → permissions (`internal/authz/repository.go`).
 2. **Every org-scoped query filters on `(id, organization_id)` together.**
    Repositories never look up an org-scoped resource by bare ID:
-   - `GetInvitationByID(orgID, invitationID)` — `WHERE id = $1 AND organization_id = $2`
-   - `GetRoleKindByID(orgID, roleID)` — same pairing
-   - `RemoveMember(orgID, userID)`, `UpdateMemberRole(orgID, userID, roleID)` — scoped
+   - `GetInvitationByID(orgID, invitationID)`: `WHERE id = $1 AND organization_id = $2`
+   - `GetRoleKindByID(orgID, roleID)`: same pairing
+   - `RemoveMember(orgID, userID)`, `UpdateMemberRole(orgID, userID, roleID)`: scoped
      deletes/updates that affect zero rows for foreign targets
    - member listing and role listing join from the authenticated org ID
-3. **Collapsed errors — foreign and nonexistent are indistinguishable.**
+3. **Collapsed errors: foreign and nonexistent are indistinguishable.**
    Cross-org targets return the same status, code, and message as targets that don't
    exist (`membership_not_found` for members/roles and for non-member leave attempts,
    `invitation_not_found` for org-scoped invitation IDs, `forbidden` at the middleware
@@ -246,7 +246,7 @@ Three layers, each verifiable:
 
 ```bash
 # A owns org A; B is a registered user with their own unrelated personal org.
-# A tries to delete B from org A — B is not a member of org A:
+# A tries to delete B from org A (B is not a member of org A):
 curl -i -X DELETE localhost:6070/v1/orgs/<orgA>/members/<userB> \
   -H "Authorization: Bearer <tokenA>"
 # -> HTTP/1.1 404 {"success":false,"error":{"code":"membership_not_found",...}}
@@ -259,7 +259,7 @@ curl -i -X DELETE localhost:6070/v1/orgs/<orgA>/members/<random-uuid> \
 # B (not a member of org A) tries to view org A, and a random org ID:
 curl -i -H "Authorization: Bearer <tokenB>" localhost:6070/v1/orgs/<orgA>
 curl -i -H "Authorization: Bearer <tokenB>" localhost:6070/v1/orgs/<random-uuid>
-# -> both HTTP/1.1 403 forbidden — foreign org and nonexistent org are indistinguishable
+# -> both HTTP/1.1 403 forbidden; foreign org and nonexistent org are indistinguishable
 
 # A role ID from another org collapses to not-found on invite:
 curl -i -X POST localhost:6070/v1/orgs/<orgA>/members/invite \
@@ -288,14 +288,14 @@ The generic permission model cannot express "only for non-owner targets," so
 service-layer rules sit above the middleware check, executed inside the same
 transaction as the mutation:
 
-- The **last owner** cannot be removed, demoted, or leave — `409 last_owner`
+- The **last owner** cannot be removed, demoted, or leave, with `409 last_owner`
   (`ErrLastOwner`), enforced on `Remove`, `AssignRole`, **and** `Leave`, with a
   row-locked count so two concurrent removals can't both read "2 owners."
 - Only an **owner** can remove an owner, grant **or** revoke owner status (the
   owner-action restriction in `AssignRole` fires in both directions), or invite/rotate
-  into the owner role — `403 owner_action_restricted` (`ErrOwnerActionRestricted`).
+  into the owner role: `403 owner_action_restricted` (`ErrOwnerActionRestricted`).
 - **Personal organizations** (created exactly once per user, at registration) can never
-  be deleted — `409 cannot_delete_personal_org` (`ErrCannotDeletePersonalOrg`) — and
+  be deleted (`409 cannot_delete_personal_org`, `ErrCannotDeletePersonalOrg`) and
   never accept members: `Invite` rejects them with `409 personal_workspace`
   (`ErrPersonalWorkspace`) before any invitation row is created. Org `type` is never
   accepted from any request, so "personal" is not a flag a caller can forge.
@@ -309,10 +309,10 @@ Tests: `TestLastOwnerCannotBeRemovedOrDemoted`, `TestOwnerActionRestricted`,
 **The scoping pattern as a whole.** Every cross-tenant question in the codebase is
 answered by one of exactly two shapes: (a) an `(id, organization_id)` pair in the
 WHERE clause (single-resource lookups), or (b) a join from the caller's own
-memberships (`GET /me/organizations` — inherently cross-tenant, scoped by `user_id`).
+memberships (`GET /me/organizations`, inherently cross-tenant, scoped by `user_id`).
 There are no other shapes. That uniformity is what makes "no IDOR" a reviewable claim:
 auditing the repository layer for a query that trusts a bare ID is a mechanical scan,
-not a judgment call. Additionally, every Authz decision — allowed or denied — is
+not a judgment call. Additionally, every Authz decision, allowed or denied, is
 recorded to `authz_decisions` (`RecordDecision`, called from the middleware), so a
 reviewer can answer "what did this user attempt, and when" after the fact; and the
 `/authz-decisions` endpoint is itself protected by `audit_log.view`, so the trail is
@@ -327,18 +327,18 @@ source read, not hypotheticals.
 
 **Fixed since the previous revision (verified in the working tree):**
 
-- **Personal orgs accepting members** — `Invite` now returns `409 personal_workspace`
+- **Personal orgs accepting members**: `Invite` now returns `409 personal_workspace`
   before any invitation row is created (the existing `cannot_delete_personal_org` guard
   on `Delete` is unchanged).
-- **Non-owner demoting a non-last owner** — `AssignRole` now applies the owner-action
+- **Non-owner demoting a non-last owner**: `AssignRole` now applies the owner-action
   restriction in both directions: an admin granting *or* revoking owner status gets
   `403 owner_action_restricted`; the last-owner guard (`409 last_owner`) is unchanged.
-- **Registration without `last_name` returning 500** — `users.last_name` is now
+- **Registration without `last_name` returning 500**: `users.last_name` is now
   nullable (`migrations/000001`) and an omitted `last_name` is stored as NULL;
   registration succeeds with 201 (`TestRegisterWithoutLastName_Succeeds`).
-- **Duplicate invite accept returning 500** — `CreateMembership` translates the
+- **Duplicate invite accept returning 500**: `CreateMembership` translates the
   memberships `UNIQUE(user_id, organization_id)` violation to `409 already_member`.
-- **Suspended-user login returning 500** — `Login` returns `ErrUserSuspended` for any
+- **Suspended-user login returning 500**: `Login` returns `ErrUserSuspended` for any
   `status != 'active'` account; `response.HandleError` now maps it to
   `403 user_suspended` (`TestLogin_SuspendedUserReturns403`).
 
@@ -346,16 +346,14 @@ Remaining:
 
 1. **`X-Forwarded-For` is trusted for rate-limit keys.** `utils.ClientIP` prefers XFF
    over `RemoteAddr`; behind a proxy that appends rather than overwrites, a client can
-   spoof the key. The code comment flags this — it must be verified against the actual
+   spoof the key. The code comment flags this; it must be verified against the actual
    deployment's proxy config. Accepted risk (deployment-config).
-2. **Penetration-test artifacts live outside the repo.** The claim of a "self-run
-   penetration pass (OWASP ZAP or equivalent)" is substantiated by the manual
-   verification pass and substitute passive/probe sweep documented in
-   [SECURITY_SCAN.md](SECURITY_SCAN.md); the raw evidence artifacts and the ZAP
-   failure logs live in `/tmp/opencode/mtas-sec-r2/` (see the scan report's evidence
-   index). The automated ZAP component itself was blocked by environment network
-   limits and was not executed.
-3. **Session fixation has no dedicated test** (see §1) — it is covered indirectly by
+2. **Penetration-test evidence lives outside the repo.** The claim of a "self-run
+   penetration pass (OWASP ZAP or equivalent)" is substantiated by a manual verification
+   pass and a substitute passive/probe sweep; the raw evidence artifacts and the ZAP
+   failure logs are kept outside the repo. The automated ZAP component itself was
+   blocked by environment network limits and was not executed.
+3. **Session fixation has no dedicated test** (see §1); it is covered indirectly by
    lifecycle and rotation tests.
 
 Item 1 is a correctness/operational risk; items 2–3 are evidence/coverage notes.

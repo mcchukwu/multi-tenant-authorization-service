@@ -6,11 +6,11 @@ info:
     RBAC and session-management backend for isolated tenant organizations. The service
     exposes two token types:
 
-    * **Access token** — an opaque, server-issued token (NOT a JWT) returned in the
+    * **Access token**: an opaque, server-issued token (NOT a JWT) returned in the
       response body of `POST /v1/auth/login`, `POST /v1/auth/register`, and
       `POST /v1/auth/refresh`. Send it as `Authorization: Bearer <token>`. It is hashed
       (SHA-256) in the database and can be revoked immediately by revoking its session.
-    * **Refresh token** — issued as an `HttpOnly` cookie named `refresh_token`
+    * **Refresh token**: issued as an `HttpOnly` cookie named `refresh_token`
       (Path `/v1/auth`, `Secure`, `SameSite=Strict`). It rotates on every use; replaying
       a revoked refresh token revokes the entire token family.
 
@@ -66,13 +66,13 @@ paths:
       operationId: authRegister
       description: |
         Creates a user, their personal organization (`"Ada's Workspace"`, type `personal`),
-        an owner membership, and an initial session — all in one transaction. Returns an
+        an owner membership, and an initial session, all in one transaction. Returns an
         access token in the body and sets the `refresh_token` + `csrf_token` cookies.
 
         Rate limited per client IP (5 rps, burst 10). No authentication required.
 
         `last_name` is optional (validation `omitempty`) and stored as NULL when
-        omitted — the `users.last_name` column is nullable, matching the request
+        omitted; the `users.last_name` column is nullable, matching the request
         validation, so registration succeeds with 201 either way.
       requestBody:
         required: true
@@ -194,7 +194,7 @@ paths:
                 success: false
                 error: { code: invalid_credentials, message: invalid email or password }
         '403':
-          description: Account is not `active` (suspended/deleted) — login is refused with a distinct code so the client can show the right message.
+          description: Account is not `active` (suspended/deleted). Login is refused with a distinct code so the client can show the right message.
           content:
             application/json:
               example:
@@ -212,18 +212,18 @@ paths:
       operationId: authRefresh
       description: |
         Exchanges the `refresh_token` cookie for a new access token, rotating the refresh
-        token and re-issuing the CSRF cookie. No `Authorization` header is used — this
+        token and re-issuing the CSRF cookie. No `Authorization` header is used; this
         endpoint authenticates with the refresh cookie, which is why it is the one route
         protected by double-submit CSRF.
 
         Requirements:
-        1. `refresh_token` cookie (HttpOnly, Path=/v1/auth) — required.
+        1. `refresh_token` cookie (HttpOnly, Path=/v1/auth), required.
         2. `csrf_token` cookie **and** an `X-CSRF-Token` header carrying the same value.
            The CSRF check runs before any token validation; a missing/mismatched header
            yields `403 csrf_check_failed`.
 
         Rotation semantics: presenting a refresh token that was already rotated (revoked)
-        is treated as replay/theft — the entire token family is revoked (including the
+        is treated as replay/theft; the entire token family is revoked (including the
         legitimate rotated token) and `401 invalid_token` is returned. An expired refresh
         token also yields `401 invalid_token`. Rate limited per client IP (5 rps, burst 10).
       responses:
@@ -261,7 +261,7 @@ paths:
                     success: false
                     error: { code: invalid_token, message: invalid token }
         '403':
-          description: CSRF check failed — missing or mismatched X-CSRF-Token header.
+          description: 'CSRF check failed: missing or mismatched X-CSRF-Token header.'
           content:
             application/json:
               example:
@@ -279,7 +279,7 @@ paths:
       operationId: authLogout
       description: |
         Revokes exactly the session whose access token is presented, and clears both auth
-        cookies. Requires `Authorization: Bearer <access token>` (no CSRF needed — the
+        cookies. Requires `Authorization: Bearer <access token>` (no CSRF needed; the
         bearer header is never auto-attached by browsers). Returns 204 with no body.
       security:
         - bearerAuth: []
@@ -316,7 +316,7 @@ paths:
       operationId: authListSessions
       description: |
         Lists the authenticated user's live sessions (revoked ones are excluded), newest
-        first. Exactly one entry is flagged `current` — the session that issued the
+        first. Exactly one entry is flagged `current`: the session that issued the
         presented access token.
       security:
         - bearerAuth: []
@@ -362,12 +362,12 @@ paths:
       description: |
         Redeems a link-invitation token and creates the authenticated user's membership in
         the inviting organization, in one transaction (a token cannot be redeemed twice,
-        even under concurrent requests). This route is deliberately NOT org-scoped — the
-        organization is resolved from the invitation — so it requires authentication only,
+        even under concurrent requests). This route is deliberately NOT org-scoped; the
+        organization is resolved from the invitation, so it requires authentication only,
         never an authorization permission. Rate limited per client IP (5 rps, burst 10).
 
         Accepting a second invitation into an organization you already belong to is
-        rejected with `409 already_member` — `CreateMembership` translates the memberships
+        rejected with `409 already_member`; `CreateMembership` translates the memberships
         `UNIQUE(user_id, organization_id)` violation into that code.
       security:
         - bearerAuth: []
@@ -427,7 +427,7 @@ paths:
       description: |
         Creates a new `business`-type organization with the caller as its sole owner
         (owner role membership), cloning the four template roles into the new org. The org
-        `type` is never read from the request — `personal` is reachable only through
+        `type` is never read from the request; `personal` is reachable only through
         registration. Requires authentication only (no `{org_id}` exists to scope against
         yet). Not rate limited.
       security:
@@ -514,7 +514,7 @@ paths:
       description: |
         Returns one organization. Requires authentication **and** the `org.view`
         permission within that organization. The Authz middleware validates the caller's
-        active membership in `{org_id}` before the handler runs — a non-member gets
+        active membership in `{org_id}` before the handler runs, so a non-member gets
         `403 forbidden`, indistinguishable for a real foreign org and a random org ID
         (anti-enumeration). Rate limited per organization (5 rps, burst 10).
       security:
@@ -620,7 +620,7 @@ paths:
       description: |
         Soft-deletes the organization (status → `deleted`); rows are kept so the audit
         trail survives. Requires authentication and the `org.delete` permission. A
-        `personal` organization can never be deleted, even by its own owner — the service
+        `personal` organization can never be deleted, even by its own owner; the service
         returns `409 cannot_delete_personal_org` after the permission check passes. Returns
         204 with no body. Rate limited per organization (5 rps, burst 10).
       security:
@@ -710,9 +710,9 @@ paths:
         permission. Two service-layer rules sit above the permission check: only an owner
         can invite into the `owner` role (`403 owner_action_restricted` otherwise), and a
         role ID that belongs to a different organization collapses to
-        `404 membership_not_found` — indistinguishable from a nonexistent role
+        `404 membership_not_found`, indistinguishable from a nonexistent role
         (anti-enumeration). Personal organizations reject all invitations with
-        `409 personal_workspace` — the guard runs before any invitation row is created.
+        `409 personal_workspace`; the guard runs before any invitation row is created.
         Rate limited per organization.
       security:
         - bearerAuth: []
@@ -790,7 +790,7 @@ paths:
         remove another owner (`403 owner_action_restricted`), and the last owner can never
         be removed (`409 last_owner`). The target user ID is looked up scoped to
         `(organization_id, user_id)`, so a user who belongs to a different org returns
-        `404 membership_not_found` — identical to a random UUID (IDOR mitigation). Returns
+        `404 membership_not_found`, identical to a random UUID (IDOR mitigation). Returns
         204 with no body. Rate limited per organization.
       security:
         - bearerAuth: []
@@ -834,7 +834,7 @@ paths:
                     success: false
                     error: { code: owner_action_restricted, message: owner action restricted }
         '404':
-          description: Target is not a member of this org — indistinguishable from a nonexistent user.
+          description: Target is not a member of this org, indistinguishable from a nonexistent user.
           content:
             application/json:
               example:
@@ -860,7 +860,7 @@ paths:
       description: |
         Assigns a new role to a member. Requires authentication and the
         `member.assign_role` permission, plus service-layer owner rules: only an owner may
-        change anyone's owner status — granting **or** revoking the `owner` role — and a
+        change anyone's owner status, granting **or** revoking the `owner` role, and a
         non-owner gets `403 owner_action_restricted` in either direction. Demoting the last
         owner is blocked with `409 last_owner`. Returns 204 with no body. Rate limited per
         organization.
@@ -942,7 +942,7 @@ paths:
       operationId: rotateInvitation
       description: |
         Revokes an existing active invitation and issues a replacement token for the same
-        role — the same revoke-and-reissue pattern as refresh-token rotation. Requires
+        role; the same revoke-and-reissue pattern as refresh-token rotation. Requires
         authentication and the `member.invite` permission (rotating is conceptually
         "issue a new invite that replaces this one," not a separate capability). The same
         owner-target restriction applies as for creating an invite.
@@ -1012,7 +1012,7 @@ paths:
                 success: false
                 error: { code: owner_action_restricted, message: owner action restricted }
         '404':
-          description: Invitation ID is not scoped to this organization, or does not exist — collapsed to `invitation_not_found` (anti-enumeration).
+          description: Invitation ID is not scoped to this organization, or does not exist, collapsed to `invitation_not_found` (anti-enumeration).
           content:
             application/json:
               example:
@@ -1029,13 +1029,13 @@ paths:
       summary: Leave an organization
       operationId: leaveOrganization
       description: |
-        Removes the authenticated user's own membership from the organization — the
+        Removes the authenticated user's own membership from the organization; the
         self-service counterpart of removing a member. Any active member, any role, can
         leave; the route deliberately carries no permission check beyond authentication
         (Authn + per-org rate limiting only), and the service's own membership lookup
         rejects non-members.
 
-        Service rules: the organization's last owner cannot leave (`409 last_owner`) —
+        Service rules: the organization's last owner cannot leave (`409 last_owner`),
         the same min-one-owner guard as Remove/AssignRole. A caller who is not an active
         member of this org (or an org that does not exist) gets
         `404 membership_not_found`, indistinguishable for a foreign org and a random org
@@ -1057,14 +1057,14 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Caller is not an active member of this org (or the org does not exist) — indistinguishable (anti-enumeration).
+          description: Caller is not an active member of this org (or the org does not exist), indistinguishable (anti-enumeration).
           content:
             application/json:
               example:
                 success: false
                 error: { code: membership_not_found, message: membership not found }
         '409':
-          description: The organization's last owner cannot leave — the min-one-owner invariant applies to Leave as well.
+          description: The organization's last owner cannot leave; the min-one-owner invariant applies to Leave as well.
           content:
             application/json:
               example:
@@ -1340,7 +1340,7 @@ components:
 
   responses:
     Unauthorized:
-      description: Not authenticated — missing Authorization header (`missing_token`), or the presented access token is unknown, revoked, or expired (`invalid_token`).
+      description: 'Not authenticated: missing Authorization header (`missing_token`), or the presented access token is unknown, revoked, or expired (`invalid_token`).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -1589,7 +1589,7 @@ components:
         expires_at: { type: string, format: date-time, description: Refresh token expiry. }
         current:
           type: boolean
-          description: True for exactly one session — the one the presented access token belongs to.
+          description: 'True for exactly one session: the one the presented access token belongs to.'
 
     Organization:
       type: object
@@ -1600,7 +1600,7 @@ components:
         type: { type: string, enum: [personal, business] }
         slug:
           type: [string, 'null']
-          description: Always null — no code path writes the slug in this build (omitempty).
+          description: Always null; no code path writes the slug in this build (omitempty).
         status: { type: string, enum: [active, suspended, deleted] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -1704,12 +1704,12 @@ components:
           example: member.invite
         resource_type:
           type: [string, 'null']
-          description: Always null/omitted in this build — no resource endpoints exist, so no code path writes a resource type.
+          description: Always null/omitted in this build; no resource endpoints exist, so no code path writes a resource type.
         resource_id:
           type: [string, 'null']
           format: uuid
           description: Always null/omitted in this build, for the same reason as resource_type.
-        allowed: { type: boolean, description: Every check is recorded — allowed and denied. }
+        allowed: { type: boolean, description: Every check is recorded, allowed and denied. }
         reason:
           type: string
           description: 'role grants permission or role lacks permission.'

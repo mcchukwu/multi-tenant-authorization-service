@@ -1,7 +1,9 @@
 bin/*
 .log
 .env
-mv.md
+
+# Local OpenAPI viewer page (served from an endpoint instead)
+docs.html
 
 # Extend ignore patterns here
 	
