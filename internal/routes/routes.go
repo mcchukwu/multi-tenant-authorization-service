@@ -49,11 +49,13 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			http.HandlerFunc(d.AuthHandler.Login),
 		),
 	)
+
 	mux.Handle("POST /auth/register",
 		d.AuthIPLimiter.Middleware(ipKey)(
 			http.HandlerFunc(d.AuthHandler.Register),
 		),
 	)
+
 	mux.Handle("POST /auth/refresh",
 		d.AuthIPLimiter.Middleware(ipKey)(
 			http.HandlerFunc(d.AuthHandler.Refresh),
@@ -66,11 +68,13 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			http.HandlerFunc(d.AuthHandler.Logout),
 		),
 	)
+
 	mux.Handle("POST /auth/logout-all",
 		middleware.Authn(d.AuthRepo)(
 			http.HandlerFunc(d.AuthHandler.LogoutAll),
 		),
 	)
+
 	mux.Handle("GET /auth/sessions",
 		middleware.Authn(d.AuthRepo)(
 			http.HandlerFunc(d.AuthHandler.ListSessions),
@@ -111,6 +115,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("PATCH /orgs/{org_id}",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -120,6 +125,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("DELETE /orgs/{org_id}",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -140,6 +146,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("POST /orgs/{org_id}/members/invite",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -149,6 +156,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("DELETE /orgs/{org_id}/members/{user_id}",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -158,6 +166,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("PATCH /orgs/{org_id}/members/{user_id}/role",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -167,6 +176,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("POST /orgs/{org_id}/invitations/{invitation_id}/rotate",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(
@@ -176,6 +186,15 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
+	mux.Handle("POST /orgs/{org_id}/leave",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				http.HandlerFunc(d.MembershipHandler.Leave),
+			),
+		),
+	)
+
 	// Roles: read-only, role administration is out of scope for now
 	mux.Handle("GET /orgs/{org_id}/roles",
 		d.OrgRateLimiter.Middleware(orgKey)(
@@ -198,6 +217,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
 			),
 		),
 	)
+
 	mux.Handle("GET /orgs/{org_id}/authz-decisions",
 		d.OrgRateLimiter.Middleware(orgKey)(
 			middleware.Authn(d.AuthRepo)(

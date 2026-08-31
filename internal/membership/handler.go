@@ -71,7 +71,7 @@ func (h *Handler) Invite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Accept is deliberately not org-scoped — {org_id} isn't known until the
+// Accept is deliberately not org-scoped, {org_id} isn't known until the
 // invitation itself resolves it, so this route carries no {org_id}
 // segment and runs behind Authn only, never Authz.
 func (h *Handler) Accept(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +97,7 @@ func (h *Handler) Accept(w http.ResponseWriter, r *http.Request) {
 }
 
 // RotateInvite requires the invitation's ID in the route and uses the
-// same member.invite permission as creating a fresh invite. Rotating is
+// same member.invite permission as creating a fresh invite, rotating is
 // conceptually "issue a new invite that replaces this one," not a
 // separate capability.
 func (h *Handler) RotateInvite(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +126,28 @@ func (h *Handler) RotateInvite(w http.ResponseWriter, r *http.Request) {
 		Token:     result.Token,
 		ExpiresAt: result.ExpiresAt,
 	})
+}
+
+// Leave has no Authz check any active member, any role, can leave.
+// The service layer's own membership lookup is what naturally rejects
+// someone who isn't a member of this org at all (ErrNotFound), so there's
+// no meaningful permission to gate here beyond "you are who you are."
+func (h *Handler) Leave(w http.ResponseWriter, r *http.Request) {
+	orgID, err := uuid.Parse(r.PathValue("org_id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid_org_id", "Invalid organization ID")
+		return
+	}
+	userID, ok := requestctx.UserID(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "missing_identity", "Authentication required")
+		return
+	}
+	if err := h.service.Leave(r.Context(), orgID, userID); err != nil {
+		response.HandleError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) Remove(w http.ResponseWriter, r *http.Request) {

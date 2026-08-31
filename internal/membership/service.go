@@ -34,13 +34,21 @@ type InviteResult struct {
 	ExpiresAt time.Time
 }
 
-// Invite creates a rotatable link invitation. Only an owner can invite
-// someone in as another owner, the generic member.invite permission
-// proves the caller can invite people at all, not that they're trusted
-// to mint new owners specifically. That distinction has to be enforced
-// here, since role_permissions has no concept of "grant this permission,
-// but only for non-owner targets."
+// Invite creates a rotatable link invitation. Blocks personal orgs
+// unconditionally, before any invitation row is created
+//
+// Only an owner can invite someone in as another owner, the generic
+// member.invite permission proves the caller can invite people at all,
+// not that they're trusted to mint new owners specifically.
 func (s *Service) Invite(ctx context.Context, orgID, inviterID, roleID uuid.UUID) (*InviteResult, error) {
+	orgType, err := s.repo.GetOrganizationType(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	if orgType == "personal" {
+		return nil, apperrors.ErrPersonalWorkspace
+	}
+
 	targetKind, err := s.repo.GetRoleKindByID(ctx, orgID, roleID)
 	if err != nil {
 		return nil, err
@@ -71,7 +79,7 @@ func (s *Service) Invite(ctx context.Context, orgID, inviterID, roleID uuid.UUID
 // Accept turns a valid invitation into a membership. Marking the
 // invitation accepted and inserting the membership happen in one
 // transaction, so a token can't be redeemed twice even under two
-// concurrent requests racing on the same link. The second request's
+// concurrent requests racing on the same link the second request's
 // MarkInvitationAccepted finds zero rows affected (status is no longer
 // 'active') and the whole transaction rolls back.
 func (s *Service) Accept(ctx context.Context, userID uuid.UUID, rawToken string) (uuid.UUID, error) {
@@ -97,9 +105,9 @@ func (s *Service) Accept(ctx context.Context, userID uuid.UUID, rawToken string)
 }
 
 // Remove enforces two things above the generic member.remove permission:
-// only an owner may remove another owner — an admin holds member.remove
+// only an owner may remove another owner, an admin holds member.remove
 // generally, but never against an owner target, regardless of how many
-// owners currently exist — and separately, the min-one-owner invariant:
+// owners currently exist and separately, the min one owner invariant:
 // the org's last owner can never be removed by anyone. Both checks run
 // inside one transaction against the same locked owner-count read.
 func (s *Service) Remove(ctx context.Context, orgID, actorID, targetUserID uuid.UUID) error {
@@ -134,25 +142,16 @@ func (s *Service) Remove(ctx context.Context, orgID, actorID, targetUserID uuid.
 }
 
 // AssignRole enforces two rules above the generic member.assign_role
-// permission: only an owner can grant the owner role to someone else,
-// and demoting the org's only owner away from 'owner' is blocked by the
-// same min-one-owner invariant Remove enforces — losing your last owner
-// via a role change is exactly as dangerous as losing them via removal,
-// so it gets the same guard.
+// permission, both owner-only regardless of direction: granting the
+// owner role to someone new, and taking owner status away from someone
+// who currently has it, are equally sensitive an admin can reassign
+// roles generally, but never touch anyone's owner status either way.
+// The min one owner invariant is checked separately, inside the same
+// transaction, for the demotion case specifically.
 func (s *Service) AssignRole(ctx context.Context, orgID, actorID, targetUserID, newRoleID uuid.UUID) error {
 	newKind, err := s.repo.GetRoleKindByID(ctx, orgID, newRoleID)
 	if err != nil {
 		return err
-	}
-
-	if newKind == "owner" {
-		actorKind, err := s.repo.GetMemberRoleKind(ctx, orgID, actorID)
-		if err != nil {
-			return err
-		}
-		if actorKind != "owner" {
-			return apperrors.ErrOwnerActionRestricted
-		}
 	}
 
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -162,6 +161,17 @@ func (s *Service) AssignRole(ctx context.Context, orgID, actorID, targetUserID, 
 		if err != nil {
 			return err
 		}
+
+		if newKind == "owner" || currentKind == "owner" {
+			actorKind, err := txRepo.GetMemberRoleKind(ctx, orgID, actorID)
+			if err != nil {
+				return err
+			}
+			if actorKind != "owner" {
+				return apperrors.ErrOwnerActionRestricted
+			}
+		}
+
 		if currentKind == "owner" && newKind != "owner" {
 			count, err := txRepo.CountActiveOwners(ctx, orgID)
 			if err != nil {
@@ -171,13 +181,14 @@ func (s *Service) AssignRole(ctx context.Context, orgID, actorID, targetUserID, 
 				return apperrors.ErrLastOwner
 			}
 		}
+
 		return txRepo.UpdateMemberRole(ctx, orgID, targetUserID, newRoleID)
 	})
 }
 
 // RotateInvite revokes an org's existing active invitation and issues a
 // new token on the same role grant, same revoke and reissue pattern
-// refresh token rotation uses, and the same owner target restriction as
+// refresh token rotation uses, and the same owner-target restriction as
 // creating a fresh invite (an admin still can't mint access to the owner
 // role, whether by inviting fresh or rotating an existing invite).
 func (s *Service) RotateInvite(ctx context.Context, orgID, actorID, invitationID uuid.UUID) (*InviteResult, error) {
@@ -221,8 +232,44 @@ func (s *Service) RotateInvite(ctx context.Context, orgID, actorID, invitationID
 	return &InviteResult{Token: rawToken, ExpiresAt: expiresAt}, nil
 }
 
-// newInviteToken is deliberately separate from auth's token generation,
-// it needs the same random-generation shape but none of the opaque
+// Leave is the self-service version of Remove, a member removing
+// themselves. Reuses the exact same min one owner invariant: the org's
+// last owner can't leave, full stop. To leave, the last owner has to
+// first grant someone else the owner role via AssignRole, at that
+// point there are two owners, and leaving no longer violates the
+// invariant. That composition (AssignRole + Leave) is also the entire
+// ownership transfer mechanism this system needs; no separate
+// "transfer ownership" endpoint required.
+//
+// Unlike Remove, there's no actor-kind restriction here, the
+// only an owner removes an owner rule exists to stop someone *else*
+// from removing an owner against their will, not to stop an owner from
+// removing themselves voluntarily. Any member, any role, can leave.
+func (s *Service) Leave(ctx context.Context, orgID, userID uuid.UUID) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		txRepo := NewRepository(tx)
+
+		kind, err := txRepo.GetMemberRoleKind(ctx, orgID, userID)
+		if err != nil {
+			return err
+		}
+
+		if kind == "owner" {
+			count, err := txRepo.CountActiveOwners(ctx, orgID)
+			if err != nil {
+				return err
+			}
+			if count <= 1 {
+				return apperrors.ErrLastOwner
+			}
+		}
+
+		return txRepo.RemoveMember(ctx, orgID, userID)
+	})
+}
+
+// newInviteToken is deliberately separate from auth's token generation.
+// It needs the same random-generation shape but none of the opaque
 // session-token semantics, and importing auth only for HashOpaqueToken
 // (used above, at storage time) keeps that dependency to exactly the one
 // thing this package actually needs from it.

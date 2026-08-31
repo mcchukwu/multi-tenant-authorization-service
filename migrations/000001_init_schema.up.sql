@@ -23,7 +23,7 @@ CREATE TABLE users (
   phone          TEXT UNIQUE,
   password_hash  TEXT NOT NULL,
   first_name     TEXT NOT NULL,
-  last_name      TEXT NOT NULL,
+  last_name      TEXT,
   status         user_status NOT NULL DEFAULT 'active',
   email_verified BOOLEAN NOT NULL DEFAULT false,
   phone_verified BOOLEAN NOT NULL DEFAULT false,

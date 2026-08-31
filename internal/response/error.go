@@ -89,6 +89,8 @@ func HandleError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusConflict, "email_already_exists", "email already exists")
 	case errors.Is(err, apperrors.ErrPhoneAlreadyExists):
 		Error(w, http.StatusConflict, "phone_already_exists", "phone already exists")
+	case errors.Is(err, apperrors.ErrUserSuspended):
+		Error(w, http.StatusForbidden, "user_suspended", "user suspended")
 
 	// ORGS
 	case errors.Is(err, apperrors.ErrOrganizationNotFound):
@@ -115,10 +117,14 @@ func HandleError(w http.ResponseWriter, err error) {
 	// MEMBERSHIPS
 	case errors.Is(err, apperrors.ErrMembershipNotFound):
 		Error(w, http.StatusNotFound, "membership_not_found", "membership not found")
+	case errors.Is(err, apperrors.ErrMembershipRoleNotFound):
+		Error(w, http.StatusNotFound, "membership_not_found", "membership not found")
 	case errors.Is(err, apperrors.ErrAlreadyMember):
 		Error(w, http.StatusConflict, "already_member", "user already belongs to organization")
 	case errors.Is(err, apperrors.ErrInvitationPending):
 		Error(w, http.StatusConflict, "invitation_pending", "invitation already pending")
+	case errors.Is(err, apperrors.ErrInvitationNotFound):
+		Error(w, http.StatusNotFound, "invitation_not_found", "invitation not found")
 	case errors.Is(err, apperrors.ErrPersonalWorkspace):
 		Error(w, http.StatusConflict, "personal_workspace",
 			"this is a personal workspace; create a new workspace to invite members")
