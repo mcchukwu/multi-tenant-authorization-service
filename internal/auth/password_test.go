@@ -15,13 +15,10 @@ import (
 
 // TestHashPasswordVerifyPassword_RoundTrip pins the core password contract:
 // HashPassword produces an argon2id PHC string that VerifyPassword accepts
-// for the same password and rejects for any other password.
+// for the same password and rejects for any other.
 //
-// The expected values here are independent of the implementation: we assert
-// the PHC prefix literally (the stored-hash format is a cross-cutting
-// contract — it's what the DB column holds and what login re-derives from),
-// and correctness of the match/mismatch outcomes, never a recomputation of
-// the hash itself.
+// The PHC prefix is asserted literally because the stored-hash format is a
+// cross-cutting contract: it's what the DB column holds and login re-derives.
 func TestHashPasswordVerifyPassword_RoundTrip(t *testing.T) {
 	passwords := []string{
 		"correct horse battery staple",
@@ -38,7 +35,7 @@ func TestHashPasswordVerifyPassword_RoundTrip(t *testing.T) {
 			require.NoError(t, err, "HashPassword must never fail for a valid input")
 			require.NotEmpty(t, hash)
 
-			// The PHC shape is part of the storage contract — the DB stores
+			// The PHC shape is part of the storage contract; the DB stores
 			// this exact prefix and VerifyPassword parses it back.
 			assert.True(t,
 				strings.HasPrefix(hash, "$argon2id$v=19$m=19456,t=2,p=1$"),
@@ -56,9 +53,8 @@ func TestHashPasswordVerifyPassword_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestVerifyPassword_RejectsMalformedHashes ensures a corrupt or hostile
-// stored hash cannot panic, error in a confusing way, or be accepted.
-// Every case must return an error and must not return ok=true.
+// TestVerifyPassword_RejectsMalformedHashes: a corrupt or hostile stored
+// hash must error out, never panic, and never verify as true.
 func TestVerifyPassword_RejectsMalformedHashes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -83,18 +79,15 @@ func TestVerifyPassword_RejectsMalformedHashes(t *testing.T) {
 	}
 }
 
-// TestVerifyPassword_HonorsParamsEmbeddedInHash is the anti-tautology test
-// for the parameter-parsing path. VerifyPassword claims to re-derive using
-// the parameters embedded in the hash (m/t/p), NOT the package constants
-// (m=19456,t=2,p=1). We prove that by building a valid PHC string with
-// deliberately DIFFERENT parameters (m=65536,t=3,p=2), computed with
-// argon2.IDKey directly in the test, and asserting VerifyPassword accepts
-// it. If the implementation ignored the embedded params and re-used today's
-// constants, this test would fail — and if it recomputed expectations the
-// way the code does, it would pass by construction.
+// TestVerifyPassword_HonorsParamsEmbeddedInHash is the anti-tautology check
+// for parameter parsing: VerifyPassword must re-derive using the params
+// embedded in the hash (m/t/p), not the package constants. We mint a valid
+// PHC string with different params (m=65536,t=3,p=2) via argon2.IDKey and
+// assert it verifies; an implementation that ignored the embedded params
+// would fail this.
 func TestVerifyPassword_HonorsParamsEmbeddedInHash(t *testing.T) {
 	const (
-		memory     = 64 * 1024 // 64 MiB — deliberately different from production's 19 MiB
+		memory     = 64 * 1024 // 64 MiB, deliberately different from production's 19 MiB
 		iterations = 3         // production uses 2
 		keyLen     = 32
 	)

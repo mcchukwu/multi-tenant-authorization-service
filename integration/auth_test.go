@@ -11,17 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAuthLifecycle_RegisterLoginRefreshLogout is the mandatory full happy
-// path: register -> login -> refresh -> logout, asserting the real response
-// shapes (201/200/200/204), the rotation of the refresh cookie, and that
-// logout revokes exactly the current session and nothing else.
+// TestAuthLifecycle_RegisterLoginRefreshLogout covers the full happy path:
+// register, login, refresh, logout (201/200/200/204), refresh-token rotation,
+// and logout revoking only the current session.
 func TestAuthLifecycle_RegisterLoginRefreshLogout(t *testing.T) {
 	user := registerUser(t, "lifecycle")
 
 	// 1. Register already happened in registerUser (201 + tokens + cookies).
 
-	// 2. Login from a second "device" creates a second session for the same
-	// user. Both sessions must coexist and be visible.
+	// 2. Login from a second device creates a second session; both coexist.
 	device2 := newClient(t)
 	device2Token := loginOn(t, device2, user.email, user.password)
 	assert.NotEqual(t, user.accessToken, device2Token, "login must mint a fresh access token")
@@ -38,9 +36,8 @@ func TestAuthLifecycle_RegisterLoginRefreshLogout(t *testing.T) {
 	}
 	assert.Equal(t, 1, currentCount, "exactly one session should be flagged current")
 
-	// 3. Refresh rotates the refresh token: new cookie value, new access
-	// token, and the CSRF cookie is re-issued too. The access token stored
-	// on the user must be updated, since the pre-rotation one is revoked.
+	// 3. Refresh rotates the refresh and CSRF cookies and mints a new access
+	// token; the pre-rotation one is revoked, so the stored token is updated.
 	oldRefresh := user.client.refreshCookie()
 	oldCSRF := user.client.csrfCookie()
 	status, body := user.client.refresh(t, oldCSRF)
@@ -54,9 +51,8 @@ func TestAuthLifecycle_RegisterLoginRefreshLogout(t *testing.T) {
 	status, _, _ = user.client.do(t, http.MethodPost, "/v1/auth/logout", nil, user.bearer())
 	require.Equal(t, http.StatusNoContent, status, "logout returns 204")
 
-	// The logged-out session's access token is dead everywhere — the
-	// requests carry the token explicitly, so these are genuinely about
-	// revocation, not a missing Authorization header.
+	// The requests carry the token explicitly, so these 401s are about
+	// revocation, not a missing header.
 	status, _, respBody := user.client.do(t, http.MethodGet, "/v1/me/organizations", nil, user.bearer())
 	require.Equal(t, http.StatusUnauthorized, status, "post-logout token must be rejected: %s", respBody)
 	status, _, respBody = user.client.do(t, http.MethodGet, "/v1/auth/sessions", nil, user.bearer())
@@ -69,7 +65,7 @@ func TestAuthLifecycle_RegisterLoginRefreshLogout(t *testing.T) {
 	require.NoError(t, json.Unmarshal(device2Body, &env))
 	var orgs []any
 	require.NoError(t, json.Unmarshal(env.Data, &orgs), "me/organizations data is an array")
-	assert.NotEmpty(t, orgs, "device 2 session must survive device 1's logout — org list still readable")
+	assert.NotEmpty(t, orgs, "device 2 session must survive device 1's logout; org list still readable")
 }
 
 // sessionView mirrors the JSON shape of GET /v1/auth/sessions entries.
@@ -90,10 +86,9 @@ func listSessions(t *testing.T, u *testUser) []sessionView {
 	return out
 }
 
-// TestAuthRefresh_ReplayRevokesWholeFamily is the mandatory token-reuse
-// detection test. Refresh tokens rotate on every use; presenting an already
-// rotated (revoked) token is treated as theft and revokes the ENTIRE token
-// family — including the legitimate rotated token and its access token.
+// TestAuthRefresh_ReplayRevokesWholeFamily pins token-reuse detection:
+// presenting an already-rotated token revokes the whole token family,
+// including the legitimate rotated token and its access token.
 func TestAuthRefresh_ReplayRevokesWholeFamily(t *testing.T) {
 	user := registerUser(t, "replay")
 
@@ -111,19 +106,16 @@ func TestAuthRefresh_ReplayRevokesWholeFamily(t *testing.T) {
 	require.NotEqual(t, gen1Refresh, gen2Refresh)
 	require.NotEqual(t, gen1Access, gen2Access)
 
-	// Replay the OLD (now revoked) refresh token with the OLD cookie pair.
-	// The explicit cookies matter: the client's live jar already holds the
-	// rotated pair, and the CSRF check runs before token validation — a
-	// mismatched pair would be rejected as a CSRF failure and never reach
-	// the reuse-detection logic we're testing.
+	// Replay the old token pair explicitly: the live jar already holds the
+	// rotated pair, and the CSRF check runs before token validation.
 	status, body = user.client.refreshWithCookies(t, gen1Refresh, gen1CSRF, gen1CSRF)
 	require.Equal(t, http.StatusUnauthorized, status,
 		"replayed refresh token must be rejected: %s", body)
 	code := decodeErrorCode(t, body)
 	assert.Equal(t, "invalid_token", code, "replay maps to invalid_token")
 
-	// THE key assertion: the family revocation also kills the LEGITIMATE
-	// rotated token — the attacker's reuse poisons the whole lineage.
+	// The key assertion: family revocation also kills the legitimate
+	// rotated token.
 	status, body = user.client.refresh(t, gen2CSRF)
 	require.Equal(t, http.StatusUnauthorized, status,
 		"family revocation must kill the legitimately rotated token: %s", body)
@@ -154,9 +146,9 @@ func decodeErrorCode(t *testing.T, respBody []byte) string {
 	return env.Error.Code
 }
 
-// TestAuthRefresh_CSRFEnforcement verifies the double-submit cookie pattern
-// on /auth/refresh: the X-CSRF-Token header must exactly match the csrf_token
-// cookie, and the check runs BEFORE any token validation.
+// TestAuthRefresh_CSRFEnforcement verifies the double-submit pattern on
+// /auth/refresh: the X-CSRF-Token header must match the csrf_token cookie,
+// and the check runs before any token validation.
 func TestAuthRefresh_CSRFEnforcement(t *testing.T) {
 	user := registerUser(t, "csrf")
 
@@ -175,9 +167,8 @@ func TestAuthRefresh_CSRFEnforcement(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, "matching CSRF header -> 200: %s", body)
 }
 
-// TestAuthValidationAndErrorShapes pins the public error contract of the
-// auth routes: status codes, error codes, and the anti-enumeration behavior
-// of login.
+// TestAuthValidationAndErrorShapes pins the auth routes' error contract:
+// status codes, error codes, and login's anti-enumeration.
 func TestAuthValidationAndErrorShapes(t *testing.T) {
 	c := newClient(t)
 
@@ -225,8 +216,8 @@ func TestAuthValidationAndErrorShapes(t *testing.T) {
 	assert.Equal(t, "missing_token", code)
 }
 
-// TestAuthLogoutAll_RevokesEverySession: logout-all kills all sessions for
-// the user across every device.
+// TestAuthLogoutAll_RevokesEverySession verifies logout-all revokes every
+// session across devices.
 func TestAuthLogoutAll_RevokesEverySession(t *testing.T) {
 	user := registerUser(t, "logoutall")
 
@@ -250,11 +241,9 @@ func TestAuthLogoutAll_RevokesEverySession(t *testing.T) {
 	}
 }
 
-// TestRegisterWithoutLastName_Succeeds pins the corrected registration
-// contract: last_name is optional in the API (RegisterRequest validates it
-// with `omitempty`), and since the users.last_name column is nullable, a
-// registration that omits it succeeds with 201 and persists SQL NULL —
-// never a fabricated empty string and never a 500.
+// TestRegisterWithoutLastName_Succeeds pins the corrected contract: an
+// omitted last_name persists as SQL NULL and registration returns 201,
+// not a 500.
 func TestRegisterWithoutLastName_Succeeds(t *testing.T) {
 	c := newClient(t)
 	email := "nolastname-" + uuid.NewString()[:8] + "@example.com"
@@ -282,8 +271,7 @@ func TestRegisterWithoutLastName_Succeeds(t *testing.T) {
 	assert.Empty(t, data.User.LastName,
 		"omitted last_name must not fabricate a value in the response")
 
-	// Strongest evidence: the persisted row holds SQL NULL, not '' — the
-	// column itself is nullable and NULL is what an omitted value means.
+	// Strongest evidence: the persisted row holds SQL NULL, not ''.
 	var dbLastName *string
 	require.NoError(t, pool.QueryRow(context.Background(),
 		"SELECT last_name FROM users WHERE id = $1", data.User.ID).Scan(&dbLastName),
@@ -291,33 +279,24 @@ func TestRegisterWithoutLastName_Succeeds(t *testing.T) {
 	assert.Nil(t, dbLastName, "users.last_name is nullable; an omitted last_name must persist as NULL")
 }
 
-// TestLogin_SuspendedUserReturns403 pins the corrected suspended-user login
-// contract. A suspended account logging in with CORRECT credentials gets a
-// clear 403 with error code "user_suspended" (previously this path fell
-// through to a 500), and crucially the failed login must not mint any
-// session: no refresh_token cookie is issued and no session row is created.
+// TestLogin_SuspendedUserReturns403 pins the corrected suspended-user login:
+// correct credentials on a suspended account get 403 user_suspended (not a
+// 500), and the failed login mints no session.
 func TestLogin_SuspendedUserReturns403(t *testing.T) {
 	user := registerUser(t, "suspended")
 
-	// Admin-style suspension: flip the row directly in the DB, the same way
-	// the harness already reaches into the database (see
-	// TestRegisterWithoutLastName_Succeeds). There is no suspension
-	// endpoint yet, and the column is the user_status enum
-	// ('active' | 'suspended' | 'deleted').
+	// Flip the row directly in the DB; there is no suspension endpoint yet.
 	cmd, err := pool.Exec(context.Background(),
 		"UPDATE users SET status = 'suspended' WHERE id = $1", user.userID)
 	require.NoError(t, err, "suspend the user directly in the DB")
 	require.Equal(t, int64(1), cmd.RowsAffected(), "exactly one user row must be suspended")
 
-	// Login from a SECOND device: the fresh client starts cookie-free, so
-	// any refresh_token it holds after the attempt must have been issued by
-	// this very login, not by registration.
+	// Login from a fresh (cookie-free) client, so any cookie it holds after
+	// the attempt must have been issued by this very login.
 	fresh := newClient(t)
 
-	// Correct credentials on a suspended account: a clear, distinct signal
-	// (403 user_suspended) — NOT the 401 invalid_credentials that unknown
-	// users get. This is the intended contract: a known suspended user gets
-	// an explicit "your account is suspended" response.
+	// Correct credentials on a suspended account get a distinct 403
+	// user_suspended, not the 401 invalid_credentials unknown users get.
 	code := expectError(t, fresh, http.MethodPost, "/v1/auth/login",
 		map[string]any{"identifier": user.email, "password": user.password},
 		http.StatusForbidden)
@@ -329,19 +308,16 @@ func TestLogin_SuspendedUserReturns403(t *testing.T) {
 	assert.Empty(t, fresh.refreshCookie(),
 		"a suspended user's login must not set a refresh_token cookie")
 
-	// Password verification still runs BEFORE the status gate, so a
-	// suspended user presenting the WRONG password stays indistinguishable
-	// from any other failed login — the suspension status is not leaked
-	// through the error code to someone who doesn't know the password.
+	// Password verification runs before the status gate, so a wrong password
+	// on a suspended account stays indistinguishable from any other failure.
 	code = expectError(t, newClient(t), http.MethodPost, "/v1/auth/login",
 		map[string]any{"identifier": user.email, "password": "WrongPassword123"},
 		http.StatusUnauthorized)
 	assert.Equal(t, "invalid_credentials", code,
 		"suspended user with wrong password must be indistinguishable from an unknown user")
 
-	// Strongest evidence that no session was minted: the registration
-	// session is the only live session this user has. A login that created
-	// a session before failing would leave two.
+	// Strongest evidence no session was minted: the registration session is
+	// the user's only live session.
 	var sessionCount int
 	require.NoError(t, pool.QueryRow(context.Background(),
 		"SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND revoked = false", user.userID).Scan(&sessionCount),

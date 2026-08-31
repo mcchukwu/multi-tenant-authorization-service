@@ -48,10 +48,9 @@ func countRoleKind(members []memberView, kind string) int {
 	return n
 }
 
-// TestViewerRoleRestrictions is the mandatory role-matrix test: a viewer
-// can VIEW (org.view) but every mutating capability — and even member-list
-// visibility, since the seeded viewer role lacks member.view — is denied at
-// the authz middleware with 403 forbidden.
+// TestViewerRoleRestrictions is the role-matrix test: a viewer can view the
+// org but every mutating capability, including member-list visibility, is
+// denied at the authz middleware with 403 forbidden.
 func TestViewerRoleRestrictions(t *testing.T) {
 	fx := seedOrg(t, "viewer")
 
@@ -111,11 +110,9 @@ func listDecisions(t *testing.T, actor *testUser, orgID string) []decisionView {
 	return out
 }
 
-// TestLastOwnerCannotBeRemovedOrDemoted is the mandatory min-one-owner
-// invariant test: with a single owner, removal (409 last_owner) and
-// self-demotion (409 last_owner) are both rejected; once a second owner
-// exists, removal of one owner is allowed, and removing the now-last owner
-// is rejected again.
+// TestLastOwnerCannotBeRemovedOrDemoted pins the min-one-owner invariant:
+// with one owner, remove and self-demote both return 409 last_owner; with a
+// co-owner, removing one owner is allowed and the guard returns.
 func TestLastOwnerCannotBeRemovedOrDemoted(t *testing.T) {
 	fx := seedOrg(t, "lastowner")
 
@@ -146,12 +143,9 @@ func TestLastOwnerCannotBeRemovedOrDemoted(t *testing.T) {
 	assert.Equal(t, "last_owner", code)
 }
 
-// TestOwnerActionRestricted is the mandatory owner-privilege escalation
-// test: an admin can remove/demote normal members but NEVER touch the owner
-// role — removing an owner, granting the owner role, inviting someone in as
-// owner, and demoting an existing owner all yield 403
-// owner_action_restricted from the service layer (after the generic
-// member.* middleware permission has already passed).
+// TestOwnerActionRestricted pins the owner-privilege guard: an admin can
+// manage normal members but never touch anyone's owner status, in either
+// direction (403 owner_action_restricted from the service layer).
 func TestOwnerActionRestricted(t *testing.T) {
 	fx := seedOrg(t, "ownerrestricted")
 
@@ -173,28 +167,23 @@ func TestOwnerActionRestricted(t *testing.T) {
 		map[string]any{"role_id": fx.Roles["owner"]}, http.StatusForbidden)
 	assert.Equal(t, "owner_action_restricted", code)
 
-	// Sanity: the admin CAN invite into a non-owner role — the restriction
-	// is target-role-specific, not a blanket ban on admin invites.
+	// Sanity: the admin can invite into a non-owner role; the restriction
+	// is target-role-specific.
 	invitee := registerUser(t, "ownerrestricted-invitee")
 	inviteAndAccept(t, fx.Admin, invitee, fx.OrgID, fx.Roles["member"])
 	assert.True(t, memberIDs(listMembers(t, fx.Owner, fx.OrgID))[invitee.userID],
 		"admin's invite into the member role must succeed")
 
-	// Admin DEMOTING the owner (assigning a non-owner role): the owner-only
-	// restriction fires in BOTH directions — an admin can't touch anyone's
-	// owner status, whether granting it or taking it away. (Previously only
-	// granting was blocked and this fell through to the last-owner guard;
-	// the corrected AssignRole rejects it before that.)
+	// Demoting the owner fires the same guard in the other direction;
+	// previously only granting was blocked.
 	code = expectError(t, fx.Admin.client, http.MethodPatch,
 		"/v1/orgs/"+fx.OrgID+"/members/"+fx.Owner.userID+"/role",
 		map[string]any{"role_id": fx.Roles["member"]}, http.StatusForbidden)
 	assert.Equal(t, "owner_action_restricted", code)
 }
 
-// TestOwnerAssignRole_NonOwnerTargetIsAllowed pins the other side of the
-// owner-action restriction: it is about OWNER STATUS specifically, not
-// about the owner role's privileges. The owner can still reassign a
-// non-owner member's role without tripping any guard.
+// TestOwnerAssignRole_NonOwnerTargetIsAllowed: the owner guard is about
+// owner status specifically; reassigning a non-owner member's role is fine.
 func TestOwnerAssignRole_NonOwnerTargetIsAllowed(t *testing.T) {
 	owner := registerUser(t, "ownergrant")
 	admin := registerUser(t, "ownergrant-admin")
@@ -212,15 +201,14 @@ func TestOwnerAssignRole_NonOwnerTargetIsAllowed(t *testing.T) {
 		"owner can reassign a non-owner member's role without tripping the owner-action guard")
 }
 
-// TestIDOR_CrossOrgMemberDeleteIs404 is the mandatory IDOR test. The
-// (id, organization_id) scoping pattern collapses "member of another org"
-// and "no such member" into the same 404, so a cross-tenant user ID is not
-// distinguishable from a nonexistent one.
+// TestIDOR_CrossOrgMemberDeleteIs404: the (id, organization_id) scoping
+// pattern collapses "member of another org" and "no such member" into the
+// same 404.
 func TestIDOR_CrossOrgMemberDeleteIs404(t *testing.T) {
 	fx := seedOrg(t, "idor")
 
-	// A user who exists but belongs to NO org we control: they have their
-	// own personal org, unrelated to fx.OrgID.
+	// A user who exists but belongs to a different org (their own personal
+	// org, unrelated to fx.OrgID).
 	outsider := registerUser(t, "idor-outsider")
 
 	code := expectError(t, fx.Owner.client, http.MethodDelete,
@@ -228,23 +216,21 @@ func TestIDOR_CrossOrgMemberDeleteIs404(t *testing.T) {
 	assert.Equal(t, "membership_not_found", code,
 		"cross-org member delete must look like a plain 404")
 
-	// A completely random UUID must be indistinguishable from the real user
-	// above: same status, same code, same message.
+	// A random UUID must be indistinguishable: same status, code, message.
 	randomID := uuid.NewString()
 	codeRandom := expectError(t, fx.Owner.client, http.MethodDelete,
 		"/v1/orgs/"+fx.OrgID+"/members/"+randomID, nil, http.StatusNotFound)
 	assert.Equal(t, code, codeRandom, "foreign user and nonexistent user must be indistinguishable")
 
-	// And an actual member of the org IS removable — proving the 404 above
-	// is scope filtering, not a broken delete.
+	// Control: a real member of the org is removable, so the 404 above is
+	// scope filtering, not a broken delete.
 	expectStatus(t, fx.Owner.client, http.MethodDelete,
 		"/v1/orgs/"+fx.OrgID+"/members/"+fx.Member.userID, nil, http.StatusNoContent, fx.Owner.bearer())
 }
 
-// TestNonMemberOrgAccess is the mandatory cross-org GET test: a request for
-// an org the caller isn't a member of is denied by the authz middleware
-// (403 forbidden) before any handler looks at the org. Crucially, a REAL
-// but foreign org and a RANDOM org ID get identical 403s — no enumeration.
+// TestNonMemberOrgAccess: an org the caller isn't a member of is denied at
+// the middleware with 403, identically for a real foreign org and a random
+// org ID.
 func TestNonMemberOrgAccess(t *testing.T) {
 	fx := seedOrg(t, "foreign")
 	stranger := registerUser(t, "foreign-stranger")
@@ -267,11 +253,9 @@ func TestNonMemberOrgAccess(t *testing.T) {
 		"/v1/orgs/"+fx.OrgID, map[string]any{"name": "Hijacked"}, http.StatusForbidden)
 }
 
-// TestPersonalOrgInvariants is the mandatory personal-org test: the
-// registration-created personal org can never be deleted (even by its own
-// owner) and never accepts members — the invite path now blocks personal
-// orgs unconditionally via Service.Invite's GetOrganizationType check,
-// returning 409 personal_workspace before any invitation row is created.
+// TestPersonalOrgInvariants: the registration-created personal org can never
+// be deleted, even by its own owner, and never accepts members (409
+// personal_workspace before any invitation row is created).
 func TestPersonalOrgInvariants(t *testing.T) {
 	user := registerUser(t, "personal")
 
@@ -285,10 +269,9 @@ func TestPersonalOrgInvariants(t *testing.T) {
 	expectError(t, newClient(t), http.MethodDelete,
 		"/v1/orgs/"+user.personalOrgID, nil, http.StatusUnauthorized)
 
-	// Personal orgs never accept members. The owner holds member.invite
-	// (the middleware lets them through) but the service blocks the invite
-	// with 409 personal_workspace — a conflict, not a permission denial,
-	// and it happens before any invitation row exists.
+	// Personal orgs never accept members: the owner passes the middleware
+	// (member.invite) but the service blocks the invite with 409
+	// personal_workspace before any invitation row exists.
 	invitee := registerUser(t, "personal-invitee")
 	roles := orgRolesByKind(t, user, user.personalOrgID)
 	require.Contains(t, roles, "member", "personal orgs do get provisioned roles")
@@ -297,16 +280,14 @@ func TestPersonalOrgInvariants(t *testing.T) {
 		map[string]any{"role_id": roles["member"]}, http.StatusConflict)
 	assert.Equal(t, "personal_workspace", code)
 
-	// A stranger's invite attempt is denied at the authz middleware: they
-	// aren't a member of the personal org at all, so they never reach the
-	// service's personal-org guard.
+	// A stranger's invite is denied at the middleware; they never reach the
+	// service guard.
 	code = expectError(t, invitee.client, http.MethodPost,
 		"/v1/orgs/"+user.personalOrgID+"/members/invite",
 		map[string]any{"role_id": roles["member"]}, http.StatusForbidden)
 	assert.Equal(t, "forbidden", code)
 
-	// The invitee never became a member: the personal org's member list is
-	// still just its owner, and the owner's own membership is intact.
+	// The invitee never became a member; the list is still just the owner.
 	members := listMembers(t, user, user.personalOrgID)
 	assert.True(t, memberIDs(members)[user.userID],
 		"owner must remain a member of their personal org")
@@ -314,11 +295,9 @@ func TestPersonalOrgInvariants(t *testing.T) {
 		"the blocked invite must not have produced a membership")
 }
 
-// TestCrossOrgIsolation_ListIsScopedToOrg verifies member lists are
-// strictly org-scoped: an owner of org A cannot list org B's members, and
-// vice versa. The actors are deliberately chosen to belong to exactly ONE
-// org each (the fixture's admin would be wrong here — they're members of
-// both orgs by construction, so their cross-org list is legitimately 200).
+// TestCrossOrgIsolation_ListIsScopedToOrg: an owner of org A can't list org
+// B's members and vice versa. The actors belong to exactly one org each
+// (the fixture's admin is a member of both and would legitimately get 200).
 func TestCrossOrgIsolation_ListIsScopedToOrg(t *testing.T) {
 	fx := seedOrg(t, "iso-a")
 
@@ -338,9 +317,8 @@ func TestCrossOrgIsolation_ListIsScopedToOrg(t *testing.T) {
 	assert.Len(t, listMembers(t, bOwner, bOrgID), 1, "org B has only its owner so far")
 }
 
-// TestInviteFlow_SingleUseToken exercises the invite lifecycle end to end:
-// token is single-use, and a role ID from a different org resolves to the
-// same collapsed 404 as a nonexistent role.
+// TestInviteFlow_SingleUseToken covers the invite lifecycle: single-use
+// tokens, foreign role IDs collapsing to 404, and duplicate-accept handling.
 func TestInviteFlow_SingleUseToken(t *testing.T) {
 	owner := registerUser(t, "inviteflow-owner")
 	invitee := registerUser(t, "inviteflow-invitee")
@@ -395,11 +373,9 @@ func TestInviteFlow_SingleUseToken(t *testing.T) {
 		"/v1/auth/invitations/"+inviteData.Token+"/accept", nil, http.StatusUnauthorized)
 	assert.Equal(t, "invalid_token", code, "reusing an accepted invitation token must fail")
 
-	// Accepting a NEW invitation into an org the user already belongs to is
-	// rejected with 409 already_member: CreateMembership translates the
-	// memberships UNIQUE(user_id, organization_id) violation (SQLSTATE
-	// 23505) into apperrors.ErrAlreadyMember instead of letting it surface
-	// as a 500.
+	// A second invitation into an org the user already belongs to is
+	// rejected with 409 already_member; the UNIQUE violation is translated,
+	// not surfaced as a 500.
 	secondInvite := expectStatus(t, owner.client, http.MethodPost,
 		"/v1/orgs/"+orgID+"/members/invite",
 		map[string]any{"role_id": roles["member"]}, http.StatusCreated, owner.bearer())
@@ -413,11 +389,8 @@ func TestInviteFlow_SingleUseToken(t *testing.T) {
 		"/v1/auth/invitations/"+secondData.Token+"/accept", nil, http.StatusConflict)
 	assert.Equal(t, "already_member", code)
 
-	// The rejected accept did NOT burn the token: the accept transaction
-	// (mark-accepted + create-membership) rolled back when the membership
-	// insert failed, so the invitation is still active. A retry hits the
-	// same conflict rather than a stale-token 401 — conflict and
-	// single-use consumption are distinguishable states.
+	// The rejected accept didn't burn the token: the transaction rolled
+	// back, so a retry hits the same conflict rather than a stale-token 401.
 	code = expectError(t, invitee.client, http.MethodPost,
 		"/v1/auth/invitations/"+secondData.Token+"/accept", nil, http.StatusConflict)
 	assert.Equal(t, "already_member", code, "a rejected accept must not consume the invitation token")
@@ -435,9 +408,8 @@ func roleKindOf(t *testing.T, members []memberView, userID string) string {
 	return ""
 }
 
-// TestRemoveMember_TakesEffectImmediately: removing a member drops them from
-// the list and their (still-valid, user-global) access token immediately
-// loses all org access via the authz membership join.
+// TestRemoveMember_TakesEffectImmediately: a removed member drops off the
+// list and their still-valid token loses all org access via the authz join.
 func TestRemoveMember_TakesEffectImmediately(t *testing.T) {
 	fx := seedOrg(t, "removal")
 
@@ -454,13 +426,10 @@ func TestRemoveMember_TakesEffectImmediately(t *testing.T) {
 		"/v1/orgs/"+fx.OrgID, nil, http.StatusForbidden)
 }
 
-// TestLeaveOrg_AnyMemberCanLeaveAndOrgAccessIsRevoked covers the new
-// POST /orgs/{org_id}/leave endpoint from the member's perspective. The
-// route sits behind Authn + rate limit only — no Authz middleware, because
-// leaving your own membership is not something a permission should gate.
-// The viewer is the deliberate actor here: the viewer role holds NO
-// member.* permissions, so a successful leave proves the route is genuinely
-// authz-free rather than merely "permitted for viewers".
+// TestLeaveOrg_AnyMemberCanLeaveAndOrgAccessIsRevoked: any member can leave,
+// and org access is revoked immediately. The viewer is the deliberate actor
+// (the viewer role holds no member.* permissions, so a successful leave
+// proves the route is genuinely authz-free).
 func TestLeaveOrg_AnyMemberCanLeaveAndOrgAccessIsRevoked(t *testing.T) {
 	fx := seedOrg(t, "leave")
 
@@ -476,18 +445,16 @@ func TestLeaveOrg_AnyMemberCanLeaveAndOrgAccessIsRevoked(t *testing.T) {
 	expectError(t, fx.Viewer.client, http.MethodGet,
 		"/v1/orgs/"+fx.OrgID, nil, http.StatusForbidden)
 
-	// Leaving again: the service's membership lookup finds nothing — 404,
-	// same as a member who never existed.
+	// Leaving again: the membership lookup finds nothing, 404 like a member
+	// who never existed.
 	code := expectError(t, fx.Viewer.client, http.MethodPost,
 		"/v1/orgs/"+fx.OrgID+"/leave", nil, http.StatusNotFound)
 	assert.Equal(t, "membership_not_found", code)
 }
 
-// TestLeaveOrg_LastOwnerCannotLeave pins the min-one-owner invariant on the
-// Leave path: the org's last owner cannot leave (409 last_owner), a rejected
-// leave changes nothing, and once a co-owner exists the original owner CAN
-// leave — that AssignRole + Leave composition is the system's ownership
-// transfer mechanism.
+// TestLeaveOrg_LastOwnerCannotLeave pins the min-one-owner invariant on
+// Leave: the last owner can't leave (409 last_owner), and once a co-owner
+// exists the original owner can, which is how ownership transfers happen.
 func TestLeaveOrg_LastOwnerCannotLeave(t *testing.T) {
 	owner := registerUser(t, "leavelast")
 	orgID := createOrg(t, owner, "Last Owner Co")
@@ -517,12 +484,9 @@ func TestLeaveOrg_LastOwnerCannotLeave(t *testing.T) {
 	expectError(t, owner.client, http.MethodGet, "/v1/orgs/"+orgID, nil, http.StatusForbidden)
 }
 
-// TestLeaveOrg_NonMemberGets404 verifies the service-level rejection for
-// people who aren't members. The Leave route has no Authz middleware, so
-// this lookalike behavior comes from the membership lookup itself: an
-// authenticated user who belongs to a DIFFERENT org, and a random org ID,
-// collapse to the same 404 membership_not_found — membership existence is
-// not enumerable through this route.
+// TestLeaveOrg_NonMemberGets404: the Leave route has no Authz middleware,
+// so the 404 for non-members comes from the membership lookup itself, and
+// a foreign user and a random org ID collapse to the same 404.
 func TestLeaveOrg_NonMemberGets404(t *testing.T) {
 	fx := seedOrg(t, "leavestranger")
 

@@ -9,12 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestHashOpaqueToken_Deterministic pins the token-hashing contract used
-// everywhere a raw token is persisted (access, refresh, invitation): SHA-256
-// hex-encoded, 64 lowercase hex characters, deterministic for the same
-// input. Determinism is load-bearing — the whole authn/authz path looks
-// sessions up BY hash, so the same raw token must always produce the same
-// lookup key.
+// TestHashOpaqueToken_Deterministic pins the token-hashing contract (SHA-256
+// hex, 64 lowercase chars, deterministic). Determinism is load-bearing:
+// sessions are looked up by hash, so the same raw token must always hash
+// the same.
 func TestHashOpaqueToken_Deterministic(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -39,24 +37,16 @@ func TestHashOpaqueToken_Deterministic(t *testing.T) {
 		})
 	}
 
-	// Different inputs must differ — a fixed or degenerate hash would make
-	// every user's token interchangeable (session confusion).
+	// Different inputs must differ; a degenerate hash would make every
+	// user's token interchangeable (session confusion).
 	assert.NotEqual(t, HashOpaqueToken("token-a"), HashOpaqueToken("token-b"),
 		"distinct inputs must hash to distinct values")
 }
 
-// TestGenerateOpaqueToken verifies the shape and uniqueness guarantees of
-// the raw-token generator. The interesting properties:
-//
-//   - raw != hashed (the thing the client holds is never what the DB stores)
-//   - hashed == HashOpaqueToken(raw) (the hashing pipeline is exactly the
-//     public function — a mismatch here would mean lookups can never match)
-//   - no collisions across many draws (a 256-bit random token space makes a
-//     birthday-bound collision astronomically unlikely, but a bug like a
-//     fixed or weakly-seeded buffer would collide immediately)
-//   - raw is 43 URL-safe base64 chars, hashed is 64 hex chars (both shape
-//     contracts: 43 = base64.RawURLEncoding of 32 random bytes without
-//     padding; 64 = hex SHA-256)
+// TestGenerateOpaqueToken checks shape and uniqueness of generated tokens:
+// raw != hashed, hashed == HashOpaqueToken(raw) (otherwise lookups could
+// never match), no collisions across 10,000 draws, and the expected lengths
+// (43 URL-safe base64 chars raw, 64 hex chars hashed).
 func TestGenerateOpaqueToken(t *testing.T) {
 	const draws = 10_000
 

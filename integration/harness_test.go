@@ -1,34 +1,10 @@
-// Package integration_test verifies the MTAS HTTP API end-to-end against a
-// real PostgreSQL server running in Docker, through the EXACT same handler
-// + middleware stack that cmd/main.go wires together at startup.
+// Package integration_test exercises the MTAS HTTP API end-to-end against a
+// real PostgreSQL container in Docker, through the same handler and middleware
+// stack that cmd/main.go wires up. It skips itself when Docker is unavailable.
 //
-// Design decisions, and why:
-//
-//   - No mocking. The point of this tier is to prove the real SQL, the real
-//     middleware chain, and the real route table agree with each other.
-//     Repositories get a real *pgxpool.Pool; httptest.Server serves real
-//     HTTP through Recovery -> RequestLogger -> SecurityHeaders -> CORS ->
-//     Authn/Authz/rate-limiters -> handlers.
-//
-//   - One container per test binary run (TestMain), shared by all tests.
-//     Each test creates its own users/orgs with unique identifiers, so tests
-//     are data-isolated despite the shared database. Tests run serially:
-//     the rate limiter is process-global state and parallel tests would
-//     leak tokens across each other.
-//
-//   - Rate-limit isolation via X-Forwarded-For. ClientIP() (utils) prefers
-//     XFF over RemoteAddr, and the auth routes' limiter is keyed on that IP.
-//     Every test user gets a unique spoofed XFF address, which both isolates
-//     tests from each other AND makes the rate-limit test deterministic.
-//
-//   - Manual cookie handling. Auth cookies are Secure+SameSite, and Go's
-//     http.Client cookie jar will not store or send Secure cookies over
-//     plain-HTTP httptest servers. We therefore track cookies ourselves,
-//     honoring each cookie's Path just like a browser would.
-//
-//   - Migrations are applied with the SIMPLE query protocol: pgx's default
-//     extended protocol rejects multi-statement query strings, and the
-//     migration files each contain many statements (DDL, triggers, seeds).
+// Two quirks matter here: the auth-route rate limiter keys on X-Forwarded-For,
+// so every test client spoofs a unique XFF address, and the Secure auth cookies
+// are tracked manually because Go's cookie jar won't send them over plain httptest.
 package integration_test
 
 import (
@@ -77,9 +53,7 @@ var (
 	ipSequencer atomic.Uint64
 )
 
-// testPassword satisfies RegisterRequest's min=8 validation for every user
-// created by the harness. Deliberately a shared constant — password strength
-// is not what these tests are about.
+// testPassword satisfies the min=8 password validation on RegisterRequest.
 const testPassword = "Sup3rSecret!123"
 
 func TestMain(m *testing.M) {
@@ -92,10 +66,8 @@ func TestMain(m *testing.M) {
 
 func run(m *testing.M) int {
 	if err := requireDocker(); err != nil {
-		// The Makefile `test` target runs `go test ./...`; on a machine
-		// without Docker this tier cannot run. Skipping with an explicit
-		// message is friendlier (and keeps `go test ./...` green) than
-		// hard-failing.
+		// Without Docker this tier can't run; skip with a clear message so
+		// `go test ./...` stays green.
 		fmt.Fprintf(os.Stderr, "SKIP integration tests: Docker unavailable (%v)\n", err)
 		return 0
 	}
@@ -115,8 +87,7 @@ func run(m *testing.M) int {
 		return 1
 	}
 
-	// The real production connect function: connection pooling config,
-	// ping, everything the app itself does.
+	// db.Connect is the same connect path production uses (pooling config, ping).
 	pool, err = db.Connect(dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "integration tests: failed to connect: %v\n", err)
@@ -149,11 +120,9 @@ func requireDocker() error {
 	return nil
 }
 
-// startPostgres runs a throwaway postgres:18 container with a random host
-// port (no collision risk), waits until it accepts connections, and returns
-// its DSN plus a cleanup func. The container name is unique per run so a
-// leaked container from a killed test process can't collide with the next
-// run.
+// startPostgres runs a throwaway postgres:18 container on a random host port
+// and waits until it accepts connections. The unique per-run name means a
+// leaked container from a killed test can't collide with the next run.
 func startPostgres(ctx context.Context) (string, func(), error) {
 	name := "mtas-it-" + uuid.NewString()[:8]
 
@@ -194,10 +163,8 @@ func startPostgres(ctx context.Context) (string, func(), error) {
 	return dsn, cleanup, nil
 }
 
-// waitForDBReady polls with a real pgx connection + Ping until Postgres is
-// accepting queries. Polling the actual thing we need beats parsing log
-// output for "ready" lines, and one failed connect attempt (auth still
-// initializing) is not a reason to give up.
+// waitForDBReady polls with a real pgx Ping until Postgres accepts queries.
+// A single early connect failure (auth still initializing) is not fatal.
 func waitForDBReady(ctx context.Context, dsn string) error {
 	const attempts = 60
 	for i := 0; i < attempts; i++ {
@@ -218,9 +185,9 @@ func waitForDBReady(ctx context.Context, dsn string) error {
 	return fmt.Errorf("postgres did not become ready within %d attempts", attempts)
 }
 
-// migrations list in application order. Order matters: 000002/000003 seed
-// the global catalog, 000004 installs the org-provisioning trigger that
-// every org created afterward depends on.
+// migrations in application order: 000002/000003 seed the global catalog,
+// 000004 installs the org-provisioning trigger every org created afterward
+// depends on.
 var migrations = []string{
 	"000001_init_schema.up.sql",
 	"000002_seed_permissions.up.sql",
@@ -228,9 +195,8 @@ var migrations = []string{
 	"000004_seed_org_defaults_function.up.sql",
 }
 
-// applyMigrations runs every migration file verbatim. Each file contains
-// many statements, so the connection must use the SIMPLE query protocol —
-// pgx's default extended protocol rejects multi-statement strings.
+// applyMigrations runs every migration file verbatim via the simple query
+// protocol; pgx's default extended protocol rejects multi-statement files.
 func applyMigrations(ctx context.Context, dsn string) error {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
@@ -261,9 +227,8 @@ func applyMigrations(ctx context.Context, dsn string) error {
 	return nil
 }
 
-// repoRoot walks up from the test package's working directory to the
-// directory containing go.mod — robust whether tests are run from the repo
-// root (`go test ./...`) or from inside the package (`go test ./integration`).
+// repoRoot walks up to the directory containing go.mod, so the tests run
+// from anywhere.
 func repoRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -281,10 +246,9 @@ func repoRoot() (string, error) {
 	}
 }
 
-// buildServer mirrors cmd/main.go's wiring line for line: same dependency
-// graph, same middleware nesting, same rate-limiter parameters (5 rps,
-// burst 10), same route registration under /v1. If this diverges from
-// production wiring, the tests are no longer testing the real system.
+// buildServer mirrors cmd/main.go's wiring: same middleware nesting, same
+// rate-limiter parameters (5 rps, burst 10), same routes. If this drifts
+// from production wiring, the tests stop testing the real system.
 func buildServer(pool *pgxpool.Pool, cfg *config.Config) *httptest.Server {
 	healthHandler := health.NewHandler(pool)
 
@@ -351,13 +315,9 @@ func buildServer(pool *pgxpool.Pool, cfg *config.Config) *httptest.Server {
 // HTTP client helper
 // ---------------------------------------------------------------------------
 
-// apiClient is a thin cookie-aware HTTP client. Each test user gets its own
-// client so cookie state is never shared; each client has its own spoofed
-// X-Forwarded-For IP so the IP-keyed auth rate limiter treats it as an
-// isolated visitor. The client also carries the user's current access token
-// and attaches it as `Authorization: Bearer <token>` automatically — so a
-// client created by registerUser/loginOn is authenticated everywhere, while
-// a bare newClient (no token) is unauthenticated by construction.
+// apiClient is a cookie-aware HTTP client. Each test user gets its own client
+// with its own spoofed XFF IP (the auth limiter keys on XFF) and its own access
+// token, attached automatically.
 type apiClient struct {
 	base    string
 	ip      string
@@ -377,9 +337,8 @@ func newClient(t *testing.T) *apiClient {
 	}
 }
 
-// do performs one request. It attaches the client's X-Forwarded-For, sends
-// every stored cookie whose Path matches the request path (browser
-// semantics), and absorbs any Set-Cookie from the response.
+// do performs one request with the client's XFF, its cookies whose Path
+// matches the request path (browser semantics), and absorbs any Set-Cookie.
 func (c *apiClient) do(t *testing.T, method, path string, body any, headers http.Header) (int, http.Header, []byte) {
 	t.Helper()
 
@@ -442,9 +401,8 @@ func (c *apiClient) refreshCookie() string {
 	return ""
 }
 
-// refresh POSTs /v1/auth/refresh with the client's cookies and the given
-// X-CSRF-Token header value (the double-submit pattern). Callers pass the
-// value explicitly so tests can replay OLD tokens deliberately.
+// refresh POSTs /v1/auth/refresh with the given X-CSRF-Token header, so
+// tests can pass an old value deliberately.
 func (c *apiClient) refresh(t *testing.T, csrfHeader string) (int, []byte) {
 	t.Helper()
 	headers := http.Header{"X-CSRF-Token": []string{csrfHeader}}
@@ -452,12 +410,9 @@ func (c *apiClient) refresh(t *testing.T, csrfHeader string) (int, []byte) {
 	return status, body
 }
 
-// refreshWithCookies POSTs /v1/auth/refresh presenting EXPLICIT cookie
-// values (refresh + CSRF) plus the CSRF header. This is how tests replay a
-// stale token pair: the client's live cookie jar would otherwise silently
-// upgrade to the newest pair, and the CSRF check (which runs BEFORE token
-// validation) would reject the replay before the reuse-detection logic ever
-// saw the token.
+// refreshWithCookies posts /v1/auth/refresh with explicit cookie values plus
+// the CSRF header, so tests can replay a stale token pair instead of the
+// rotated one the client's jar already holds.
 func (c *apiClient) refreshWithCookies(t *testing.T, refreshValue, csrfValue, csrfHeader string) (int, []byte) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, c.base+"/v1/auth/refresh", nil)
@@ -562,9 +517,8 @@ func decodeData(t *testing.T, c *apiClient, method, path string, wantStatus int,
 // Domain fixtures
 // ---------------------------------------------------------------------------
 
-// testUser is a registered user plus everything derived from that: their own
-// cookie-authenticated client, access token, and the personal org that
-// registration automatically provisions.
+// testUser is a registered user plus everything derived from registration:
+// their client, access token, and the personal org registration provisions.
 type testUser struct {
 	client        *apiClient
 	email         string
@@ -574,9 +528,9 @@ type testUser struct {
 	personalOrgID string
 }
 
-// registerUser runs the real register endpoint and captures the tokens,
-// cookies, user id, and personal org id. Emails are unique per call (the
-// users table has a UNIQUE constraint; tests share one database).
+// registerUser registers via the real endpoint and captures tokens, cookies,
+// user ID, and personal org ID. Emails are unique per call (tests share one
+// database).
 func registerUser(t *testing.T, label string) *testUser {
 	t.Helper()
 	c := newClient(t)
@@ -595,8 +549,8 @@ func registerUser(t *testing.T, label string) *testUser {
 	var env envelope
 	require.NoError(t, json.Unmarshal(respBody, &env))
 	var data struct {
-		AccessToken  string `json:"access_token"`
-		User         struct {
+		AccessToken string `json:"access_token"`
+		User        struct {
 			ID string `json:"id"`
 		} `json:"user"`
 		Organization struct {
@@ -653,10 +607,8 @@ func loginOn(t *testing.T, c *apiClient, email, password string) string {
 	return data.AccessToken
 }
 
-// orgFixture is the canonical seeded organization: one business org owned by
-// Owner with one member of each of the four system role kinds, reached
-// through the real invite+accept flow (which doubles as coverage of that
-// flow itself).
+// orgFixture is one business org owned by Owner with one member of each of
+// the four system roles, built through the real invite+accept flow.
 type orgFixture struct {
 	OrgID  string
 	Owner  *testUser
@@ -666,9 +618,8 @@ type orgFixture struct {
 	Roles  map[string]string // role kind -> role ID, e.g. Roles["owner"]
 }
 
-// seedOrg registers owner/admin/member/viewer, has the owner create a
-// business org, then invites each staff member via the invite endpoint and
-// has them accept — the same journey a real team goes through.
+// seedOrg builds the fixture org through the same journey a real team goes
+// through: register four users, create the org, invite, accept.
 func seedOrg(t *testing.T, label string) *orgFixture {
 	t.Helper()
 
@@ -710,8 +661,8 @@ func seedOrg(t *testing.T, label string) *orgFixture {
 	}
 }
 
-// orgRolesByKind lists the org's roles and indexes them by kind (stable
-// identifier — never by name, since names are editable).
+// orgRolesByKind lists the org's roles indexed by kind (stable; names are
+// editable).
 func orgRolesByKind(t *testing.T, actor *testUser, orgID string) map[string]string {
 	t.Helper()
 	respBody := expectStatus(t, actor.client, http.MethodGet,
