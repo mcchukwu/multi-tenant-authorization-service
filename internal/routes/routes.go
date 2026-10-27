@@ -1,0 +1,223 @@
+package routes
+
+import (
+	"net/http"
+
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/audit"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/auth"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/authz"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/health"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/membership"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/middleware"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/organization"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/role"
+	"github.com/mcchukwu/multi-tenant-authorization-service/internal/utils"
+)
+
+// Dependencies is built once in main and read here.
+type Dependencies struct {
+	AuthHandler       *auth.Handler
+	AuthRepo          *auth.Repository
+	AuthzRepo         *authz.Repository
+	AuthzHandler      *authz.Handler
+	AuditHandler      *audit.Handler
+	OrgHandler        *organization.Handler
+	MembershipHandler *membership.Handler
+	RoleHandler       *role.Handler
+
+	AuthIPLimiter  *middleware.RateLimiter
+	OrgRateLimiter *middleware.RateLimiter
+}
+
+func RegisterHealthRoutes(mux *http.ServeMux, h *health.Handler) {
+	mux.HandleFunc("GET /health", h.Health)
+	mux.HandleFunc("GET /health/live", h.Live)
+	mux.HandleFunc("GET /health/ready", h.Ready)
+}
+
+func RegisterAPIRoutes(mux *http.ServeMux, d Dependencies) {
+	ipKey := func(r *http.Request) string { return utils.ClientIP(r) }
+	orgKey := func(r *http.Request) string { return r.PathValue("org_id") }
+
+	// Auth: IP-keyed, no tenant yet.
+	mux.Handle("POST /auth/login",
+		d.AuthIPLimiter.Middleware(ipKey)(
+			http.HandlerFunc(d.AuthHandler.Login),
+		),
+	)
+
+	mux.Handle("POST /auth/register",
+		d.AuthIPLimiter.Middleware(ipKey)(
+			http.HandlerFunc(d.AuthHandler.Register),
+		),
+	)
+
+	mux.Handle("POST /auth/refresh",
+		d.AuthIPLimiter.Middleware(ipKey)(
+			http.HandlerFunc(d.AuthHandler.Refresh),
+		),
+	)
+
+	// Sessions: Authn only.
+	mux.Handle("POST /auth/logout",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.AuthHandler.Logout),
+		),
+	)
+
+	mux.Handle("POST /auth/logout-all",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.AuthHandler.LogoutAll),
+		),
+	)
+
+	mux.Handle("GET /auth/sessions",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.AuthHandler.ListSessions),
+		),
+	)
+
+	// Accept resolves the org from the token.
+	mux.Handle("POST /auth/invitations/{token}/accept",
+		d.AuthIPLimiter.Middleware(ipKey)(
+			middleware.Authn(d.AuthRepo)(
+				http.HandlerFunc(d.MembershipHandler.Accept),
+			),
+		),
+	)
+
+	// Organizations.
+	mux.Handle("POST /orgs",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.OrgHandler.Create),
+		),
+	)
+
+	// Cross-tenant, so no permission check.
+	mux.Handle("GET /me/organizations",
+		middleware.Authn(d.AuthRepo)(
+			http.HandlerFunc(d.OrgHandler.ListMine),
+		),
+	)
+
+	mux.Handle("GET /orgs/{org_id}",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "org.view")(
+					http.HandlerFunc(d.OrgHandler.Get),
+				),
+			),
+		),
+	)
+
+	mux.Handle("PATCH /orgs/{org_id}",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "org.update")(
+					http.HandlerFunc(d.OrgHandler.Update),
+				),
+			),
+		),
+	)
+
+	mux.Handle("DELETE /orgs/{org_id}",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "org.delete")(
+					http.HandlerFunc(d.OrgHandler.Delete),
+				),
+			),
+		),
+	)
+
+	// Members.
+	mux.Handle("GET /orgs/{org_id}/members",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "member.view")(
+					http.HandlerFunc(d.MembershipHandler.List),
+				),
+			),
+		),
+	)
+
+	mux.Handle("POST /orgs/{org_id}/members/invite",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "member.invite")(
+					http.HandlerFunc(d.MembershipHandler.Invite),
+				),
+			),
+		),
+	)
+
+	mux.Handle("DELETE /orgs/{org_id}/members/{user_id}",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "member.remove")(
+					http.HandlerFunc(d.MembershipHandler.Remove),
+				),
+			),
+		),
+	)
+
+	mux.Handle("PATCH /orgs/{org_id}/members/{user_id}/role",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "member.assign_role")(
+					http.HandlerFunc(d.MembershipHandler.AssignRole),
+				),
+			),
+		),
+	)
+
+	mux.Handle("POST /orgs/{org_id}/invitations/{invitation_id}/rotate",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "member.invite")(
+					http.HandlerFunc(d.MembershipHandler.RotateInvite),
+				),
+			),
+		),
+	)
+
+	mux.Handle("POST /orgs/{org_id}/leave",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				http.HandlerFunc(d.MembershipHandler.Leave),
+			),
+		),
+	)
+
+	// Roles: read-only.
+	mux.Handle("GET /orgs/{org_id}/roles",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "role.view")(
+					http.HandlerFunc(d.RoleHandler.List),
+				),
+			),
+		),
+	)
+
+	// Audit.
+	mux.Handle("GET /orgs/{org_id}/audit-logs",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "audit_log.view")(
+					http.HandlerFunc(d.AuditHandler.List),
+				),
+			),
+		),
+	)
+
+	mux.Handle("GET /orgs/{org_id}/authz-decisions",
+		d.OrgRateLimiter.Middleware(orgKey)(
+			middleware.Authn(d.AuthRepo)(
+				middleware.Authz(d.AuthzRepo, "audit_log.view")(
+					http.HandlerFunc(d.AuthzHandler.List),
+				),
+			),
+		),
+	)
+}
